@@ -1,6 +1,15 @@
 #!/usr/bin/env python
 import os
 import sys
+from SCons import __version__ as scons_raw_version
+
+# --- Force MSVC to English + UTF-8 output for all child processes --- #
+os.environ.setdefault("VSLANG", "1033")        # 1033 = English
+os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+os.environ.setdefault("LANG", "en_US.UTF-8")
+os.environ.setdefault("LC_ALL", "C")
+# -------------------------------------------------------------------- #
+
 
 env = SConscript("godot-cpp/SConstruct")
 
