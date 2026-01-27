@@ -13,7 +13,7 @@ void initialize_example_module(ModuleInitializationLevel p_level) {
 		return;
 	}
 
-	GDREGISTER_RUNTIME_CLASS(GDExample);
+	GDREGISTER_RUNTIME_CLASS(MyPostProcess);
 }
 
 void uninitialize_example_module(ModuleInitializationLevel p_level) {

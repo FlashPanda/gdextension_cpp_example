@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 import os
 import sys
-from SCons import __version__ as scons_raw_version
 
 # --- Force MSVC to English + UTF-8 output for all child processes --- #
 os.environ.setdefault("VSLANG", "1033")        # 1033 = English
@@ -10,8 +9,16 @@ os.environ.setdefault("LANG", "en_US.UTF-8")
 os.environ.setdefault("LC_ALL", "C")
 # -------------------------------------------------------------------- #
 
+from SCons import __version__ as scons_raw_version
 
 env = SConscript("godot-cpp/SConstruct")
+
+# 双保险：确保 SCons spawn 子进程用的 env 也被覆盖
+env["ENV"]["VSLANG"] = "1033"
+env["ENV"]["PYTHONIOENCODING"] = "utf-8"
+env["ENV"]["PYTHONUTF8"] = "1"
+env["ENV"]["LANG"] = "en_US.UTF-8"
+env["ENV"]["LC_ALL"] = "C"
 
 # For reference:
 # - CCFLAGS are compilation flags shared between C and C++
