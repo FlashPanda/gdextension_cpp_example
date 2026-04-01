@@ -100,11 +100,17 @@ Vector3I Vector3I::operator-(const Vector3I &p_point) const {
 
 Vector3I Vector3I::operator-(const Vector3 &p_point) const {
 	DEV_ASSERT(_is_vector3_valid(p_point));
+	real_t p_x = p_point.x;
+	real_t p_y = p_point.y;
+	real_t p_z = p_point.x;
+	Interval x_i(p_x);
+	Interval y_i(p_y);
+	Interval z_i(p_z);
 
 	return Vector3I(
-			x - p_point.x,
-			y - p_point.y,
-			z - p_point.z);
+			x - x_i,
+			y - y_i,
+			z - z_i);
 }
 
 Vector3I &Vector3I::operator-=(const Vector3 &p_vec) {
@@ -123,5 +129,10 @@ bool Vector3I::_is_vector3_valid(const Vector3 &p_vec) {
 			!Math::is_inf(p_vec.x) &&
 			!Math::is_inf(p_vec.y) &&
 			!Math::is_inf(p_vec.z);
+}
+
+bool Vector3I::has_nan() const
+{
+	return x.has_nan() || y.has_nan() || z.has_nan();
 }
 }

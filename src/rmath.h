@@ -78,6 +78,11 @@ class Interval {
 
     Interval operator/(Interval i) const;
 
+    bool has_nan() const
+    {
+        return Math::is_nan(low) || Math::is_nan(high);
+    }
+
     bool operator==(Interval i) const {
         return low == i.low && high == i.high;
     }
@@ -149,6 +154,8 @@ public:
 
     Vector3 error() const;
     bool is_exact() const;
+
+        bool has_nan() const;
 
     // 一元负号。
     Vector3I operator-() const;
