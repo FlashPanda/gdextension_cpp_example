@@ -14,6 +14,8 @@
 #include <unordered_map>
 #include <vector>
 #include <algorithm>
+#include <godot_cpp/variant/vector3.hpp>
+#include <godot_cpp/variant/vector2.hpp>
 
 namespace godot
 {
@@ -135,6 +137,15 @@ namespace godot
         std::atomic<size_t> _hits{0};
         std::atomic<size_t> _redundant_buffer_bytes{0};
     };
+
+// BufferCache Global Declarations
+extern BufferCache<int> *int_buffer_cache;
+extern BufferCache<Vector2> *point2_buffer_cache;
+extern BufferCache<Vector3> *point3_buffer_cache;
+extern BufferCache<Vector3> *vector3_buffer_cache;
+extern BufferCache<Vector3> *normal3_buffer_cache;
+
+void init_buffer_caches();
 }
 
 #endif //GDEXTENSION_CPP_EXAMPLE_BUFFER_CACHE_H

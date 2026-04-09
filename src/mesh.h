@@ -20,12 +20,10 @@ namespace godot
 
         std::string to_string() const;
 
-        bool write_ply(std::string filename) const;
-
         static void init();
 
         int n_triangles, n_vertices;
-        const int *vertex_indices = nullptr;
+        const int* vertex_indices = nullptr;
         const Vector3 *p = nullptr;
         const Vector3 *n = nullptr;
         const Vector3 *s = nullptr;
