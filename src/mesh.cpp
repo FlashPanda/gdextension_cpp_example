@@ -1,6 +1,7 @@
 #include "mesh.h"
 #include <godot_cpp/core/error_macros.hpp>
 #include "buffer_cache.h"
+#include <sstream>
 
 namespace godot
 {
@@ -8,7 +9,7 @@ namespace godot
     //STAT_MEMORY_COUNTER("Memory/Triangles", triangleBytes);
     TriangleMesh::TriangleMesh(const Transform3D& p_render_from_object, bool p_reverse_orientation,
                      std::vector<int> p_vertex_indices, std::vector<Vector3> p,
-                     std::vector<Vector3> S, std::vector<Vector3> n,
+                     std::vector<Vector3> s, std::vector<Vector3> n,
                      std::vector<Vector2> uv, std::vector<int> face_indices)
     {
         DEV_ASSERT(p_vertex_indices.size() % 3 == 0);
@@ -23,7 +24,7 @@ namespace godot
 
 		// Transform mesh vertices to rendering space and initialize mesh _p_
 		for (Vector3& pt : p)
-			pt =p_render_from_object * pt;
+			pt = p_render_from_object.xform(pt);
 
 		this->p = point3_buffer_cache ->lookup_or_add({p.data(), p.size()});
 
@@ -38,7 +39,7 @@ namespace godot
         if (!n.empty()) {
             DEV_ASSERT(n.size() == n_vertices);
             for (Vector3& nn : n){
-                nn = p_render_from_object.basis * nn;
+                nn = p_render_from_object.basis.xform(nn);
                 if (reverse_orientation)
                     nn = -nn;
             }
@@ -48,7 +49,7 @@ namespace godot
         if (!s.empty()) {
             DEV_ASSERT(s.size() == n_vertices);
             for (Vector3& ss : s){
-                ss = p_render_from_object.basis * ss;
+                ss = p_render_from_object.basis.xform(ss);
             }
             this->s = vector3_buffer_cache->lookup_or_add({s.data(), s.size()});
         }
@@ -62,16 +63,10 @@ namespace godot
     std::string TriangleMesh::to_string() const {
         std::ostringstream oss;
         oss << "[ TriangleMesh "
-            << "reverse_orientation: " << reverse_orientation? "true" : "false"
-            << " transform_swaps_handedness: " << transform_swaps_handedness? "true" : "false"
-            << " n_triangles: " << (vertex_indices.size() / 3)
-            << " nVertices: " << p.size()
-            << " vertex_indices size: " << vertex_indices.size()
-            << " p size: " << p.size()
-            << " n size: " << n.size()
-            << " s size: " << s.size()
-            << " uv size: " << uv.size()
-            << " face_indices size: " << face_indices.size()
+            << "reverse_orientation: " << (reverse_orientation ? "true" : "false")
+            << " transform_swaps_handedness: " << (transform_swaps_handedness ? "true" : "false")
+            << " n_triangles: " << n_triangles
+            << " n_vertices: " << n_vertices
             << " ]";
 
         return oss.str();
