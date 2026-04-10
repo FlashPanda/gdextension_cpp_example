@@ -34,6 +34,10 @@ namespace godot {
         Medium medium;// = nullptr;
     };
 
+    class RayDifferential : public Ray{
+
+    };
+
     inline Vector3 offset_ray_origin(Vector3I pi, Vector3 n, Vector3 w) {
         // Find vector _offset_ to corner of error bounds and compute initial _po_
         real_t d = n.abs().dot(pi.error());

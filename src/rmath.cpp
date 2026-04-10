@@ -135,4 +135,7 @@ bool Vector3I::has_nan() const
 {
 	return x.has_nan() || y.has_nan() || z.has_nan();
 }
+
+Vector3 Vector3I::to_vector3() const {
+	return Vector3(x.midpoint(), y.midpoint(), z.midpoint());
 }

@@ -155,7 +155,7 @@ public:
     Vector3 error() const;
     bool is_exact() const;
 
-        bool has_nan() const;
+    bool has_nan() const;
 
     // 一元负号。
     Vector3I operator-() const;
@@ -174,6 +174,8 @@ public:
 
     // 点 - 向量。
     Vector3I &operator-=(const Vector3 &p_vec);
+
+    Vector3 to_vector3() const;
 
 private:
     static bool _is_vector3_valid(const Vector3 &p_vec);
