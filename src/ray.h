@@ -35,7 +35,32 @@ namespace godot {
     };
 
     class RayDifferential : public Ray{
+    public:
+        RayDifferential() = default;
+        RayDifferential(Point3f o, Vector3f d, Float time = 0.f, Medium medium = Medium())
+            : Ray(o, d, time, medium) {}
+        explicit RayDifferential(const Ray &ray) : Ray(ray) {}
 
+        void scale_differentials(real_t s) {
+            
+        }
+
+        bool has_nan() const {
+            return Ray::has_nan() || (
+                has_differentials && (
+                    Math::is_nan(rx_origin.x) || Math::is_nan(rx_origin.y) || Math::is_nan(rx_origin.z) ||
+                    Math::is_nan(ry_origin.x) || Math::is_nan(ry_origin.y) || Math::is_nan(ry_origin.z) ||
+                    Math::is_nan(rx_direction.x) || Math::is_nan(rx_direction.y) || Math::is_nan(rx_direction.z) ||
+                    Math::is_nan(ry_direction.x) || Math::is_nan(ry_direction.y) || Math::is_nan(ry_direction.z)
+                )
+            )
+        }
+        
+        std::string to_string() const;
+
+        bool has_differentials = false;
+        Vector3 rx_origin, ry_origin;
+        Vector3 rx_direction, ry_direction;
     };
 
     inline Vector3 offset_ray_origin(Vector3I pi, Vector3 n, Vector3 w) {

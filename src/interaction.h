@@ -81,7 +81,25 @@ namespace godot
             }
 
             RayDifferential spawn_ray(Vector3 d) const {
+                return RayDifferential(offset_ray_origin(d, false), d, time, get_medium(d));
+            }
 
+            Ray spawn_ray_to(Vector3 p2) const {
+                Ray r = godot::spawn_ray_to(pi, n, time, p2);
+                r.medium = get_medium(r.d)
+                return r;
+            }
+
+            Ray spawn_ray_to(const Interaction& it) const {
+                Ray r = godot::spawn_ray_to(pi, n, time, it.pi, it.n);
+                r.medium = get_medium(r.d);
+                return r;
+            }
+
+            Medium get_medium(Vector3 w) const {
+                if (medium_interface)
+                    return w.dot(n) > 0? medium_interface->outside : medium_interface->inside;
+                return medium;
             }
 
             std::string to_string() const;
@@ -96,11 +114,15 @@ namespace godot
             Medium medium;// = nullptr;
     };
 
+    class MediumInteraction : public Interaction {
+    public:
+        MediumInteraction() 
+    };
+
     class SurfaceInteraction : public Interaction {
     };
 
-    class MediumInteraction : public Interaction {
-    };
+
 }
 
 #endif
