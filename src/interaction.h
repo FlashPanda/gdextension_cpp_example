@@ -86,7 +86,7 @@ namespace godot
 
             Ray spawn_ray_to(Vector3 p2) const {
                 Ray r = godot::spawn_ray_to(pi, n, time, p2);
-                r.medium = get_medium(r.d)
+                r.medium = get_medium(r.d);
                 return r;
             }
 
