@@ -23,6 +23,7 @@ namespace godot
         NanoVDBMedium
     >;
 
+    // 用于进行体积散射
     class Medium
     {
         public:
@@ -33,7 +34,30 @@ namespace godot
 
         std::string to_string() const;
 
-        bool is_emissive() const;
+        // bool is_emissive() const
+        // {
+        //     return std::visit([](const auto& m) {
+        //         return medium.is_emissive();
+        //     }, medium);
+        // }
+
+        // MediumProperties sample_point(const Vector3 &p,
+        //     const SampledWavelengths &lambda) const 
+        // {
+        //     return std::visit([&](const auto &m) {
+        //         return m.sample_point(p, lambda);
+        //     }, medium);
+        // }
+
+        // RayMajorantIterator sample_ray(
+        //     const Ray &ray,
+        //     float t_max,
+        //     const SampledWavelengths &lambda
+        // ) const {
+        //     return std::visit([&](const auto &m) {
+        //         return m.sample_ray(ray, t_max, lambda);
+        //     }, medium);
+        // }
 
     private:
         MediumVariant medium;
