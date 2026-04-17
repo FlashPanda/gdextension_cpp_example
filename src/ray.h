@@ -24,25 +24,31 @@ namespace godot {
         Vector3 operator()(float t) const { return o + d * t; }
 
         Ray() = default;
-        Ray(Vector3 o, Vector3 d, float time = 0.f, Medium medium = Medium())
-            : o(o), d(d), time(time), medium(medium) {}
+        Ray(Vector3 o, Vector3 d, float time = 0.f/*, Medium medium = Medium()*/)
+            : o(o), d(d), time(time)//, medium(medium)
+        {
+
+        }
 
         // Ray Public Members
         Vector3 o;	// origin point
         Vector3 d;	// direction vector
         float time = 0;
-        Medium medium;// = nullptr;
+        //Medium medium;// = nullptr;
     };
 
     class RayDifferential : public Ray{
     public:
         RayDifferential() = default;
-        RayDifferential(Point3f o, Vector3f d, Float time = 0.f, Medium medium = Medium())
-            : Ray(o, d, time, medium) {}
+        RayDifferential(Vector3 o, Vector3 d, real_t time = 0.f/* , Medium medium = Medium() */)
+            : Ray(o, d, time/*, medium*/) {}
         explicit RayDifferential(const Ray &ray) : Ray(ray) {}
 
         void scale_differentials(real_t s) {
-            
+            rx_origin = o + (rx_origin - o) * s;
+            ry_origin = o + (ry_origin - o) * s;
+            rx_direction = d + (rx_direction - d) * s;
+            ry_direction = d + (ry_direction - d) * s;
         }
 
         bool has_nan() const {
@@ -53,7 +59,7 @@ namespace godot {
                     Math::is_nan(rx_direction.x) || Math::is_nan(rx_direction.y) || Math::is_nan(rx_direction.z) ||
                     Math::is_nan(ry_direction.x) || Math::is_nan(ry_direction.y) || Math::is_nan(ry_direction.z)
                 )
-            )
+            );
         }
         
         std::string to_string() const;

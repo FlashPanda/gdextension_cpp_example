@@ -34,7 +34,7 @@ namespace godot
             }
 
             Interaction(Vector3 p, Vector3 wo, real_t time, Medium medium, bool is_wo = true)
-                : pi(p), time(time), medium(medium) {
+                : pi(p), time(time)/*, medium(medium)*/ {
                     if (is_wo)
                         wo = wo;
                     else 
@@ -50,13 +50,13 @@ namespace godot
             Interaction(const Vector3I& pi, Vector3 n, Vector2 uv)
                 : pi(pi), n(n), uv(uv) {}
             Interaction(Vector3 p, real_t time, Medium medium)
-                : pi(p), time(time), medium(medium) {}
+                : pi(p), time(time)/*, medium(medium)*/ {}
 
             Interaction(Vector3 p, const MediumInterface* medium_interface)
-                : pi(p), medium_interface(medium_interface) {}
+                : pi(p)/*, medium_interface(medium_interface)*/ {}
 
             Interaction(Vector3 p, real_t time, const MediumInterface* medium_interface)
-                : pi(p), time(time), medium_interface(medium_interface) {}
+                : pi(p), time(time)/*, medium_interface(medium_interface)*/ {}
 
             const MediumInteraction& as_medium() const {
                 DEV_ASSERT(is_medium_interaction());
@@ -81,26 +81,26 @@ namespace godot
             }
 
             RayDifferential spawn_ray(Vector3 d) const {
-                return RayDifferential(offset_ray_origin(d, false), d, time, get_medium(d));
+                return RayDifferential(offset_ray_origin(d, false), d, time/*, get_medium(d)*/);
             }
 
             Ray spawn_ray_to(Vector3 p2) const {
                 Ray r = godot::spawn_ray_to(pi, n, time, p2);
-                r.medium = get_medium(r.d);
+                // r.medium = get_medium(r.d);
                 return r;
             }
 
             Ray spawn_ray_to(const Interaction& it) const {
                 Ray r = godot::spawn_ray_to(pi, n, time, it.pi, it.n);
-                r.medium = get_medium(r.d);
+                // r.medium = get_medium(r.d);
                 return r;
             }
 
-            Medium get_medium(Vector3 w) const {
-                if (medium_interface)
-                    return w.dot(n) > 0? medium_interface->outside : medium_interface->inside;
-                return medium;
-            }
+            // Medium get_medium(Vector3 w) const {
+            //     if (medium_interface)
+            //         return w.dot(n) > 0? medium_interface->outside : medium_interface->inside;
+            //     return medium;
+            // }
 
             std::string to_string() const;
 
@@ -110,16 +110,51 @@ namespace godot
             Vector3 n;
             Vector2 uv;
 
-            const MediumInterface* medium_interface = nullptr;
-            Medium medium;// = nullptr;
+            // const MediumInterface* medium_interface = nullptr;
+            // Medium medium;// = nullptr;
     };
 
     class MediumInteraction : public Interaction {
     public:
-        MediumInteraction() 
+        MediumInteraction()  {}
+
+        MediumInteraction(Vector3 p, Vector3 wo, real_t time, Medium medium /*,PhaseFunction phase*/)
+            : Interaction(p, wo, time, medium, true)/*, phase(phase)*/ {}
+
+        std::string to_string() const
+        {
+            return "MediumInteraction";
+        }
+
+        // use for volume scattering
+        // PhaseFunction phase;
     };
 
     class SurfaceInteraction : public Interaction {
+    public:
+        SurfaceInteraction() = default;
+        SurfaceInteraction(Vector3I pi, Vector2 uv, Vector3 wo, Vector3 dpdu, Vector3 dpdv,
+            Vector3 dndu, Vector3 dndv, real_t time, bool flipNormal)
+            : Interaction(pi, wo, uv), dpdu(dpdu), dpdv(dpdv), dndu(dndu), dndv(dndv) {} 
+            
+        
+        Vector3 dpdu, dpdv;
+        Vector3 dndu, dndv;
+
+        struct {
+            Vector3 n;
+            Vector3 dpdu, dpdv;
+            Vector3 dndu, dndv;
+        } shading;
+
+        int face_index = 0;
+        Material material;
+        // Light area_light;    // 交点是否会发光，只有面积光源才会用到，godot里没有面积光源。
+        Vector3 dpdx, dpdy;
+        real_t dudx = 0;
+        real_t dvdx = 0;
+        real_t dudy = 0;
+        real_t dvdy = 0;
     };
 
 
