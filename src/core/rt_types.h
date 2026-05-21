@@ -3,7 +3,12 @@
 
 namespace godot_rt
 {
-
+    enum class MaterialType : uint8_t {
+        Diffuse,
+        Mirror,
+        Dielectric,
+        Emissive
+    };
 }
 
 #endif //GDEXTENSION_CPP_EXAMPLE_RT_TYPES_H

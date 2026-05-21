@@ -7,7 +7,12 @@ file(GLOB_RECURSE GDEXAMPLE_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h"
 )
 
-add_library(gdexample_index STATIC EXCLUDE_FROM_ALL ${GDEXAMPLE_SOURCES})
+add_library(gdexample_index STATIC EXCLUDE_FROM_ALL ${GDEXAMPLE_SOURCES}
+        src/core/rt_math.h
+        src/core/rt_random.h
+        src/core/rt_color.h
+        src/core/rt_light.h
+        src/core/rt_light.cpp)
 
 target_include_directories(gdexample_index PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src"

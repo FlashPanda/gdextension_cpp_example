@@ -7,13 +7,11 @@
 
 
 #include <godot_cpp/variant/vector3.hpp>
-#include "medium.h"
-#include "rmath.h"
-#include "rfloat.h"
+#include "rt_math.h"
 
 #include <string>
 
-namespace godot {
+namespace godot_rt {
 
     class Ray {
     public:
