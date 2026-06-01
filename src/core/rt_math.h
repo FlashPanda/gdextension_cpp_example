@@ -11,4 +11,8 @@
 #include <godot_cpp/variant/vector2i.hpp>
 #include <godot_cpp/core/math_defs.hpp>
 
+namespace godot_rt {
+    using godot::real_t;
+}
+
 #endif //GDEXTENSION_CPP_EXAMPLE_INDEX_RT_MATH_H

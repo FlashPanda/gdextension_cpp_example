@@ -2,9 +2,11 @@
 
 #include <godot_cpp/classes/array_mesh.hpp>
 #include <godot_cpp/classes/base_material3d.hpp>
+#include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/material.hpp>
 #include <godot_cpp/classes/mesh.hpp>
 #include <godot_cpp/classes/mesh_instance3d.hpp>
+#include <godot_cpp/core/math.hpp>
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/basis.hpp>
@@ -34,6 +36,9 @@ namespace {
 
         if (base_material->get_feature(godot::BaseMaterial3D::FEATURE_EMISSION)) {
             material.emission = base_material->get_emission() * base_material->get_emission_energy_multiplier();
+            if (material.emission.get_luminance() > 0.0f) {
+                material.type = MaterialType::Emissive;
+            }
         }
 
         return material;
@@ -119,11 +124,21 @@ namespace {
 
 Scene SceneExtractor::extract(godot::Node* root) const {
     Scene scene;
-    extract_node(root, scene);
+    extract_node(root, scene, nullptr);
     return scene;
 }
 
-void SceneExtractor::extract_node(godot::Node* node, Scene& scene) const {
+ExtractedScene SceneExtractor::extract_with_camera(godot::Node* root) const {
+    ExtractedScene extracted_scene;
+    CameraSearch camera_search;
+    extract_node(root, extracted_scene.scene, &camera_search);
+
+    extracted_scene.has_camera = camera_search.has_camera;
+    extracted_scene.camera = camera_search.camera;
+    return extracted_scene;
+}
+
+void SceneExtractor::extract_node(godot::Node* node, Scene& scene, CameraSearch* camera_search) const {
     if (node == nullptr) {
         return;
     }
@@ -133,9 +148,16 @@ void SceneExtractor::extract_node(godot::Node* node, Scene& scene) const {
         extract_mesh_instance(mesh_instance, scene);
     }
 
+    if (camera_search != nullptr) {
+        godot::Camera3D* godot_camera = godot::Object::cast_to<godot::Camera3D>(node);
+        if (godot_camera != nullptr) {
+            extract_camera(godot_camera, *camera_search);
+        }
+    }
+
     const int32_t child_count = node->get_child_count();
     for (int32_t i = 0; i < child_count; ++i) {
-        extract_node(node->get_child(i), scene);
+        extract_node(node->get_child(i), scene, camera_search);
     }
 }
 
@@ -215,6 +237,29 @@ void SceneExtractor::extract_mesh_instance(godot::MeshInstance3D* mesh_instance,
             }
         }
     }
+}
+
+void SceneExtractor::extract_camera(godot::Camera3D* godot_camera, CameraSearch& camera_search) const {
+    if (godot_camera == nullptr ||
+        godot_camera->get_projection() != godot::Camera3D::PROJECTION_PERSPECTIVE) {
+        return;
+    }
+
+    const bool is_current = godot_camera->is_current();
+    if (camera_search.has_current_camera || (camera_search.has_camera && !is_current)) {
+        return;
+    }
+
+    Camera camera;
+    camera.camera_to_world = godot_camera->get_camera_transform();
+    camera.fov_y_radians = godot::Math::deg_to_rad(godot_camera->get_fov());
+    camera.fov_axis = godot_camera->get_keep_aspect_mode() == godot::Camera3D::KEEP_WIDTH
+                          ? CameraFovAxis::Horizontal
+                          : CameraFovAxis::Vertical;
+
+    camera_search.camera = camera;
+    camera_search.has_camera = true;
+    camera_search.has_current_camera = is_current;
 }
 
 }

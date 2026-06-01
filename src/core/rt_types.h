@@ -1,6 +1,8 @@
 #ifndef GDEXTENSION_CPP_EXAMPLE_RT_TYPES_H
 #define GDEXTENSION_CPP_EXAMPLE_RT_TYPES_H
 
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <string>
 
@@ -62,9 +64,46 @@ namespace godot_rt
         float ior = 1.5f;
     };
 
+    enum class CameraFovAxis : std::uint8_t {
+        Vertical,
+        Horizontal
+    };
+
     struct Camera {
         godot::Transform3D camera_to_world;
         float fov_y_radians = 0.0f;
+        CameraFovAxis fov_axis = CameraFovAxis::Vertical;
+
+        RayDifferential generate_primary_ray(godot::Vector2 pixel_sample, godot::Vector2i image_size) const {
+            const float width = static_cast<float>(std::max(image_size.x, 1));
+            const float height = static_cast<float>(std::max(image_size.y, 1));
+            const float aspect = width / height;
+
+            const float tan_fov = std::tan(fov_y_radians * 0.5f);
+            float tan_x = tan_fov * aspect;
+            float tan_y = tan_fov;
+            if (fov_axis == CameraFovAxis::Horizontal) {
+                tan_x = tan_fov;
+                tan_y = tan_fov / aspect;
+            }
+
+            const float ndc_x = (pixel_sample.x / width) * 2.0f - 1.0f;
+            const float ndc_y = 1.0f - (pixel_sample.y / height) * 2.0f;
+
+            godot::Vector3 local_direction(ndc_x * tan_x, ndc_y * tan_y, -1.0f);
+            if (local_direction.length_squared() == 0.0f) {
+                local_direction = godot::Vector3(0.0f, 0.0f, -1.0f);
+            }
+            local_direction.normalize();
+
+            godot::Vector3 world_direction = camera_to_world.basis.xform(local_direction);
+            if (world_direction.length_squared() == 0.0f) {
+                world_direction = camera_to_world.basis.xform(godot::Vector3(0.0f, 0.0f, -1.0f));
+            }
+            world_direction.normalize();
+
+            return RayDifferential(camera_to_world.origin, world_direction);
+        }
     };
 }
 

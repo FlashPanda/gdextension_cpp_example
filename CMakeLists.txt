@@ -13,7 +13,8 @@ add_library(gdexample_index STATIC EXCLUDE_FROM_ALL ${GDEXAMPLE_SOURCES}
         src/core/rt_color.h
         src/core/rt_light.h
         src/core/rt_light.cpp
-        src/scene/rt_scene.h)
+        src/scene/rt_scene.h
+        src/accel/accel_interface.h)
 
 target_include_directories(gdexample_index PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
