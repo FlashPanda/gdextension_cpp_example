@@ -33,6 +33,7 @@ namespace godot_rt {
 
         bool render_next_tile(Tile* out_tile = nullptr);
         void render_tile(const Tile& tile);
+        godot::Color trace_path(const Ray& ray, Rng& rng) const;
         godot::Color trace_path(const RayDifferential& ray, Rng& rng) const;
 
         Film& get_film();

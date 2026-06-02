@@ -74,7 +74,7 @@ namespace godot_rt
         float fov_y_radians = 0.0f;
         CameraFovAxis fov_axis = CameraFovAxis::Vertical;
 
-        RayDifferential generate_primary_ray(godot::Vector2 pixel_sample, godot::Vector2i image_size) const {
+        Ray generate_primary_ray(godot::Vector2 pixel_sample, godot::Vector2i image_size) const {
             const float width = static_cast<float>(std::max(image_size.x, 1));
             const float height = static_cast<float>(std::max(image_size.y, 1));
             const float aspect = width / height;
@@ -102,7 +102,11 @@ namespace godot_rt
             }
             world_direction.normalize();
 
-            return RayDifferential(camera_to_world.origin, world_direction);
+            return Ray(camera_to_world.origin, world_direction);
+        }
+
+        RayDifferential generate_primary_ray_differential(godot::Vector2 pixel_sample, godot::Vector2i image_size) const {
+            return RayDifferential(generate_primary_ray(pixel_sample, image_size));
         }
     };
 }

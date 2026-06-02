@@ -151,11 +151,15 @@ void CpuPathTracer::render_tile(const Tile& tile) {
                     static_cast<float>(y) + jitter.y
                 );
 
-                const RayDifferential ray = camera.generate_primary_ray(pixel_sample, settings.image_size);
+                const RayDifferential ray = camera.generate_primary_ray_differential(pixel_sample, settings.image_size);
                 film.add_sample(pixel, trace_path(ray, rng));
             }
         }
     }
+}
+
+godot::Color CpuPathTracer::trace_path(const Ray& ray, Rng& rng) const {
+    return trace_path(RayDifferential(ray), rng);
 }
 
 godot::Color CpuPathTracer::trace_path(const RayDifferential& ray, Rng& rng) const {

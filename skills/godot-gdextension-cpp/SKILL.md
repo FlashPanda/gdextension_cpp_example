@@ -9,6 +9,8 @@ description: Bilingual project guidance for this Godot GDExtension C++ renderer.
 
 处理本项目时，优先遵循这些规则。
 
+当修改代码的时候，检查当前skill文件中是否需要做必要的修改。
+
 ### 项目结构
 
 - `src/` 存放 GDExtension C++ 源码。
@@ -62,6 +64,8 @@ description: Bilingual project guidance for this Godot GDExtension C++ renderer.
 ## English Notes
 
 Follow these rules when working on this project.
+
+When modifying code, check whether the current skill file needs any necessary updates.
 
 ### Project Layout
 
