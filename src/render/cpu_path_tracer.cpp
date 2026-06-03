@@ -1,15 +1,10 @@
 #include "cpu_path_tracer.h"
 
 #include <algorithm>
-#include <cmath>
 #include <cstdint>
-#include <vector>
 
 namespace godot_rt {
 namespace {
-
-    constexpr float PI = 3.14159265358979323846f;
-    constexpr float RAY_EPSILON = 0.0001f;
 
     godot::Color black() {
         return godot::Color(0.0f, 0.0f, 0.0f, 1.0f);
@@ -32,66 +27,6 @@ namespace {
         return mix_u64(seed);
     }
 
-    const Material& material_or_default(const Scene& scene, int material_id) {
-        static const Material default_material;
-        const std::vector<Material>& materials = scene.get_materials();
-        if (material_id < 0 || material_id >= static_cast<int>(materials.size())) {
-            return default_material;
-        }
-        return materials[material_id];
-    }
-
-    float max_rgb(const godot::Color& color) {
-        return std::max(color.r, std::max(color.g, color.b));
-    }
-
-    void add_emission(godot::Color& radiance, const godot::Color& throughput, const godot::Color& emission) {
-        radiance.r += throughput.r * emission.r;
-        radiance.g += throughput.g * emission.g;
-        radiance.b += throughput.b * emission.b;
-        radiance.a = 1.0f;
-    }
-
-    void multiply_throughput(godot::Color& throughput, const godot::Color& albedo) {
-        throughput.r *= albedo.r;
-        throughput.g *= albedo.g;
-        throughput.b *= albedo.b;
-        throughput.a = 1.0f;
-    }
-
-    godot::Vector3 sample_cosine_hemisphere(const godot::Vector3& normal, Rng& rng) {
-        const godot::Vector2 u = rng.next_2d();
-        const float r = std::sqrt(u.x);
-        const float theta = 2.0f * PI * u.y;
-        const float x = r * std::cos(theta);
-        const float y = r * std::sin(theta);
-        const float z = std::sqrt(std::max(0.0f, 1.0f - u.x));
-
-        godot::Vector3 n = normal;
-        n.normalize();
-
-        godot::Vector3 tangent;
-        if (std::abs(n.x) > std::abs(n.z)) {
-            tangent = godot::Vector3(-n.y, n.x, 0.0f);
-        } else {
-            tangent = godot::Vector3(0.0f, -n.z, n.y);
-        }
-        if (tangent.length_squared() == 0.0f) {
-            tangent = godot::Vector3(1.0f, 0.0f, 0.0f);
-        }
-        tangent.normalize();
-
-        godot::Vector3 bitangent = n.cross(tangent);
-        if (bitangent.length_squared() == 0.0f) {
-            bitangent = godot::Vector3(0.0f, 1.0f, 0.0f);
-        }
-        bitangent.normalize();
-
-        godot::Vector3 direction = tangent * x + bitangent * y + n * z;
-        direction.normalize();
-        return direction;
-    }
-
 }
 
 void CpuPathTracer::reset(const Scene& new_scene, const Camera& new_camera, CpuPathTracerSettings new_settings) {
@@ -112,6 +47,7 @@ void CpuPathTracer::reset(const Scene& new_scene, const Camera& new_camera, CpuP
     if (accel) {
         accel->build(scene);
     }
+    rebuild_integrator();
 }
 
 void CpuPathTracer::set_accel(std::unique_ptr<AccelInterface> new_accel) {
@@ -119,6 +55,7 @@ void CpuPathTracer::set_accel(std::unique_ptr<AccelInterface> new_accel) {
     if (accel) {
         accel->build(scene);
     }
+    rebuild_integrator();
 }
 
 bool CpuPathTracer::render_next_tile(Tile* out_tile) {
@@ -163,49 +100,11 @@ godot::Color CpuPathTracer::trace_path(const Ray& ray, Rng& rng) const {
 }
 
 godot::Color CpuPathTracer::trace_path(const RayDifferential& ray, Rng& rng) const {
-    if (!accel) {
+    if (!integrator) {
         return black();
     }
 
-    godot::Color radiance = black();
-    godot::Color throughput(1.0f, 1.0f, 1.0f, 1.0f);
-    RayDifferential current_ray = ray;
-
-    for (int depth = 0; depth < settings.max_depth; ++depth) {
-        Hit hit;
-        if (!accel->intersect(current_ray, &hit)) {
-            break;
-        }
-
-        const Material& material = material_or_default(scene, hit.materialId);
-        if (max_rgb(material.emission) > 0.0f) {
-            add_emission(radiance, throughput, material.emission);
-        }
-
-        if (material.type == MaterialType::Emissive) {
-            break;
-        }
-
-        godot::Vector3 normal = hit.normal;
-        if (normal.length_squared() == 0.0f) {
-            break;
-        }
-        normal.normalize();
-        if (normal.dot(current_ray.d) > 0.0f) {
-            normal = -normal;
-        }
-
-        multiply_throughput(throughput, material.albedo);
-        if (max_rgb(throughput) <= 0.0f) {
-            break;
-        }
-
-        const godot::Vector3 bounce_direction = sample_cosine_hemisphere(normal, rng);
-        current_ray = RayDifferential(hit.position + normal * RAY_EPSILON, bounce_direction);
-    }
-
-    radiance.a = 1.0f;
-    return radiance;
+    return integrator->trace(ray, rng);
 }
 
 Film& CpuPathTracer::get_film() {
@@ -226,6 +125,10 @@ const Camera& CpuPathTracer::get_camera() const {
 
 const CpuPathTracerSettings& CpuPathTracer::get_settings() const {
     return settings;
+}
+
+void CpuPathTracer::rebuild_integrator() {
+    integrator = Integrator::create("random_walk", &scene, accel.get(), settings.max_depth);
 }
 
 }

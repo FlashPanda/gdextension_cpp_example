@@ -3,9 +3,13 @@
 #include <godot_cpp/classes/array_mesh.hpp>
 #include <godot_cpp/classes/base_material3d.hpp>
 #include <godot_cpp/classes/camera3d.hpp>
+#include <godot_cpp/classes/directional_light3d.hpp>
+#include <godot_cpp/classes/light3d.hpp>
 #include <godot_cpp/classes/material.hpp>
 #include <godot_cpp/classes/mesh.hpp>
 #include <godot_cpp/classes/mesh_instance3d.hpp>
+#include <godot_cpp/classes/omni_light3d.hpp>
+#include <godot_cpp/classes/spot_light3d.hpp>
 #include <godot_cpp/core/math.hpp>
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/array.hpp>
@@ -15,6 +19,8 @@
 #include <godot_cpp/variant/packed_vector3_array.hpp>
 #include <godot_cpp/variant/transform3d.hpp>
 #include <godot_cpp/variant/variant.hpp>
+
+#include <algorithm>
 
 namespace godot_rt {
 namespace {
@@ -79,6 +85,30 @@ namespace {
 
         out_index = index;
         return true;
+    }
+
+    bool light_is_visible(godot::Light3D* godot_light) {
+        if (godot_light->is_inside_tree()) {
+            return godot_light->is_visible_in_tree();
+        }
+        return godot_light->is_visible();
+    }
+
+    bool extract_light_type(godot::Light3D* godot_light, LightType& out_type) {
+        if (godot::Object::cast_to<godot::DirectionalLight3D>(godot_light) != nullptr) {
+            out_type = LightType::Directional;
+            return true;
+        }
+        if (godot::Object::cast_to<godot::SpotLight3D>(godot_light) != nullptr) {
+            out_type = LightType::Spot;
+            return true;
+        }
+        if (godot::Object::cast_to<godot::OmniLight3D>(godot_light) != nullptr) {
+            out_type = LightType::Omni;
+            return true;
+        }
+
+        return false;
     }
 
     void add_triangle(Scene& scene,
@@ -148,6 +178,11 @@ void SceneExtractor::extract_node(godot::Node* node, Scene& scene, CameraSearch*
         extract_mesh_instance(mesh_instance, scene);
     }
 
+    godot::Light3D* godot_light = godot::Object::cast_to<godot::Light3D>(node);
+    if (godot_light != nullptr) {
+        extract_light(godot_light, scene);
+    }
+
     if (camera_search != nullptr) {
         godot::Camera3D* godot_camera = godot::Object::cast_to<godot::Camera3D>(node);
         if (godot_camera != nullptr) {
@@ -159,6 +194,35 @@ void SceneExtractor::extract_node(godot::Node* node, Scene& scene, CameraSearch*
     for (int32_t i = 0; i < child_count; ++i) {
         extract_node(node->get_child(i), scene, camera_search);
     }
+}
+
+void SceneExtractor::extract_light(godot::Light3D* godot_light, Scene& scene) const {
+    if (godot_light == nullptr ||
+        godot_light->is_editor_only() ||
+        godot_light->is_negative() ||
+        !light_is_visible(godot_light)) {
+        return;
+    }
+
+    Light light;
+    if (!extract_light_type(godot_light, light.type)) {
+        return;
+    }
+
+    light.transform = godot_light->get_global_transform();
+    light.color = godot_light->get_color();
+    light.energy = std::max(godot_light->get_param(godot::Light3D::PARAM_ENERGY), 0.0f);
+    light.range = std::max(godot_light->get_param(godot::Light3D::PARAM_RANGE), 0.0f);
+    light.attenuation = std::max(godot_light->get_param(godot::Light3D::PARAM_ATTENUATION), 0.0f);
+    light.spot_angle_radians = godot::Math::deg_to_rad(godot_light->get_param(godot::Light3D::PARAM_SPOT_ANGLE));
+    light.spot_attenuation = std::max(godot_light->get_param(godot::Light3D::PARAM_SPOT_ATTENUATION), 0.0f);
+    light.casts_shadow = godot_light->has_shadow();
+
+    if (light.energy <= 0.0) {
+        return;
+    }
+
+    scene.add_light(light);
 }
 
 void SceneExtractor::extract_mesh_instance(godot::MeshInstance3D* mesh_instance, Scene& scene) const {

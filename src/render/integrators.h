@@ -1,106 +1,66 @@
 #ifndef GDEXTENSION_CPP_EXAMPLE_INTEGRATORS_H
 #define GDEXTENSION_CPP_EXAMPLE_INTEGRATORS_H
 
-#include <functional>
 #include <memory>
-#include <vector>
 
-#include <godot_cpp/templates/vector.hpp>
-#include <godot_cpp/variant/aabb.hpp>
-#include <godot_cpp/variant/string.hpp>
-#include <godot_cpp/variant/vector2.hpp>
-#include <godot_cpp/variant/vector2i.hpp>
-#include <godot_cpp/variant/vector3.hpp>
 #include <godot_cpp/core/math_defs.hpp>
 #include <godot_cpp/variant/color.hpp>
+#include <godot_cpp/variant/string.hpp>
 
 #include "../core/ray.h"
+#include "../core/rt_light.h"
+#include "../core/rt_random.h"
+#include "../core/rt_types.h"
+#include "../scene/rt_scene.h"
 
-namespace godot_rt
-{
-    class Sampler;
-    class Light;
-    class Ray;
-    class Camera;
-    class Hit;
+namespace godot_rt {
+
     class AccelInterface;
 
-    // 积分器基类
-    class Integrator
-    {
+    class Integrator {
     public:
         virtual ~Integrator();
 
         static std::unique_ptr<Integrator> create(
             const godot::String& name,
-            Camera* camera,
-            Sampler* sampler,
+            const Scene* scene,
             AccelInterface* accel,
-            std::vector<Light> lights
-            );
+            int max_depth
+        );
 
         virtual godot::String to_string() const = 0;
-
-        virtual void render() = 0;
+        virtual godot::Color trace(const RayDifferential& ray, Rng& rng) const = 0;
 
         bool intersect(const Ray& ray, Hit* hit, real_t t_max = Math_INF) const;
-
         bool intersect_p(const Ray& ray, real_t t_max = Math_INF) const;
-
-        // 判断两点之间是否未被遮挡
         bool unoccluded(const Hit& p0, const Hit& p1) const;
 
-        AccelInterface* aggregate;
-        std::vector<Light> lights;
-    protected:
-        Integrator(AccelInterface* accel, std::vector<Light> lights);
-    };
-
-    class ImageTileIntegrator: public Integrator {
-    public:
-        ImageTileIntegrator(Camera* camera, Sampler* sampler, AccelInterface* accel,
-            std::vector<Light> lights)
-                : Integrator(accel, lights) , camera(camera), sampler_propertype(sampler){}
-
-        void render();
-
-        virtual void evaluate_pixel_sample(godot::Vector2i p_pixel, int sample_index, Sampler* sampler) = 0;
+        void set_scene(const Scene* new_scene);
+        void set_accel(AccelInterface* new_accel);
+        void set_max_depth(int new_max_depth);
 
     protected:
-        Camera* camera;
-        Sampler* sampler_propertype;
+        Integrator(const Scene* scene, AccelInterface* accel, int max_depth);
+
+        const Scene* scene = nullptr;
+        AccelInterface* aggregate = nullptr;
+        int max_depth = 0;
     };
 
-    class RayIntegrator: public ImageTileIntegrator {
+    class RandomWalkIntegrator final : public Integrator {
     public:
-        RayIntegrator(Camera* camera, Sampler* sampler, AccelInterface* accel, std::vector<Light> lights)
-            : ImageTileIntegrator(camera, sampler, accel, lights) {}
+        RandomWalkIntegrator(const Scene* scene, AccelInterface* accel, int max_depth);
 
-        void evaluate_pixel_sample(godot::Vector2i p_pixel, int sample_index, Sampler* sampler) final;
-
-        virtual godot::Color li(RayDifferential ray, Sampler* sampler) const = 0;
-    };
-
-    class RandomWalkIntegrator: public RayIntegrator {
-    public:
-        RandomWalkIntegrator(int max_depth, Camera* camera, Sampler* sampler,
-            AccelInterface* accel, std::vector<Light> lights):
-        RayIntegrator(camera, sampler, accel, lights), max_depth(max_depth) {}
-
-        static std::unique_ptr<RandowmWalkIntegrator> create(
-            Camera* camera, Sampler* sampler, AccelInterface* accel, std::vector<Light> lights);
+        static std::unique_ptr<RandomWalkIntegrator> create(
+            const Scene* scene,
+            AccelInterface* accel,
+            int max_depth
+        );
 
         godot::String to_string() const final;
-
-        godot::Color li(RayDifferential ray, Sampler* sampler) const {
-            return li_random_walk(ray, sampler, 0);
-        }
-
-    private:
-        godot::Color li_random_walk(RayDifferential ray, Sampler* sampler, int depth) const;
-
-        int max_depth;
+        godot::Color trace(const RayDifferential& ray, Rng& rng) const final;
     };
+
 }
 
-#endif //GDEXTENSION_CPP_EXAMPLE_INTEGRATORS_H
+#endif // GDEXTENSION_CPP_EXAMPLE_INTEGRATORS_H

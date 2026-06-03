@@ -13,6 +13,7 @@
 #include "../accel/accel_interface.h"
 #include "film.h"
 #include "frame_accumulator.h"
+#include "integrators.h"
 
 namespace godot_rt {
 
@@ -44,12 +45,15 @@ namespace godot_rt {
         const CpuPathTracerSettings& get_settings() const;
 
     private:
+        void rebuild_integrator();
+
         Scene scene;
         Camera camera;
         CpuPathTracerSettings settings;
         Film film;
         FrameAccumulator frame_accumulator;
         std::unique_ptr<AccelInterface> accel;
+        std::unique_ptr<Integrator> integrator;
     };
 
 }

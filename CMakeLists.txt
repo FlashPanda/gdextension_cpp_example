@@ -14,7 +14,10 @@ add_library(gdexample_index STATIC EXCLUDE_FROM_ALL ${GDEXAMPLE_SOURCES}
         src/core/rt_light.h
         src/core/rt_light.cpp
         src/scene/rt_scene.h
-        src/accel/accel_interface.h)
+        src/accel/accel_interface.h
+        src/util/logger.h
+        src/accel/brute_force_accel.h
+        src/render/integrators.cpp)
 
 target_include_directories(gdexample_index PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
