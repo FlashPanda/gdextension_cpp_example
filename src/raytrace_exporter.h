@@ -27,6 +27,20 @@ namespace godot {
             int32_t max_depth,
             int64_t seed
         );
+        static Dictionary start_render_scene_to_png(
+            Node* root,
+            Camera3D* camera,
+            Vector2i image_size,
+            const String& output_path,
+            int32_t samples_per_pixel,
+            int32_t max_depth,
+            int64_t seed
+        );
+        static Dictionary poll_render_job(int64_t job_id);
+        static Dictionary cancel_render_job(int64_t job_id);
+        static Dictionary release_render_job(int64_t job_id);
+
+        static void shutdown_render_jobs();
     };
 
 } // namespace godot

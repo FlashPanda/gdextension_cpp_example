@@ -20,6 +20,8 @@ void uninitialize_example_module(ModuleInitializationLevel p_level) {
     if (p_level != MODULE_INITIALIZATION_LEVEL_SCENE) {
         return;
     }
+
+    RayTraceExporter::shutdown_render_jobs();
 }
 
 extern "C" {
