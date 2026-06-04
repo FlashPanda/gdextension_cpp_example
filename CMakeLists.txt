@@ -17,7 +17,8 @@ add_library(gdexample_index STATIC EXCLUDE_FROM_ALL ${GDEXAMPLE_SOURCES}
         src/accel/accel_interface.h
         src/util/logger.h
         src/accel/brute_force_accel.h
-        src/render/integrators.cpp)
+        src/render/integrators.cpp
+        godot-cpp/test/src/register_types.cpp)
 
 target_include_directories(gdexample_index PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src"

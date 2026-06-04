@@ -1,16 +1,3 @@
-[gd_scene load_steps=3 format=3 uid="uid://crvpo2mn4wxlb"]
-
-[ext_resource type="Script" uid="uid://cfrnu8133re76" path="res://main.gd" id="1_0xm2m"]
-[ext_resource type="Texture2D" uid="uid://7pii6v8j45du" path="res://icon.svg" id="1_ig7tw"]
+[gd_scene format=3 uid="uid://crvpo2mn4wxlb"]
 
 [node name="main" type="Node3D"]
-
-[node name="GDExample" type="GDExample" parent="."]
-amplitude = 50.0
-speed = 3.01
-position = Vector2(96.4475, 0.292809)
-texture = ExtResource("1_ig7tw")
-offset = Vector2(100, 100)
-script = ExtResource("1_0xm2m")
-
-[connection signal="position_changed" from="GDExample" to="GDExample" method="_on_Sprite2D_position_changed"]

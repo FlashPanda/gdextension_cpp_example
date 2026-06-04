@@ -1,6 +1,5 @@
 #include "register_types.h"
 
-#include "gdexample.h"
 #include "raytrace_exporter.h"
 
 #include <gdextension_interface.h>
@@ -14,7 +13,6 @@ void initialize_example_module(ModuleInitializationLevel p_level) {
         return;
     }
 
-    GDREGISTER_CLASS(GDExample);
     GDREGISTER_CLASS(RayTraceExporter);
 }
 

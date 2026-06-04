@@ -47,11 +47,17 @@ func _on_trace_pressed() -> void:
 		push_error("Ray trace export failed: invalid viewport size.")
 		return
 
+	if not ClassDB.class_exists(&"RayTraceExporter"):
+		push_error("Ray trace export failed: RayTraceExporter GDExtension is not loaded.")
+		return
+
 	_button.disabled = true
 	_button.text = "Tracing..."
 	await get_tree().process_frame
 
-	var result: Dictionary = RayTraceExporter.render_scene_to_png(
+	var result: Dictionary = ClassDB.class_call_static(
+		&"RayTraceExporter",
+		&"render_scene_to_png",
 		root,
 		camera,
 		image_size,

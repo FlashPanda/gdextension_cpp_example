@@ -20,7 +20,7 @@ using namespace godot;
 namespace {
 
     constexpr int TILE_SIZE = 16;
-    const String DEFAULT_OUTPUT_PATH = "res://raytrace_output/current_scene.png";
+    constexpr const char DEFAULT_OUTPUT_PATH[] = "res://raytrace_output/current_scene.png";
 
     Dictionary make_result(bool ok,
                            const String& path,
@@ -111,7 +111,7 @@ void RayTraceExporter::_bind_methods() {
         D_METHOD("render_scene_to_png", "root", "camera", "image_size", "output_path",
                  "samples_per_pixel", "max_depth", "seed"),
         &RayTraceExporter::render_scene_to_png,
-        DEFVAL(DEFAULT_OUTPUT_PATH),
+        DEFVAL(String(DEFAULT_OUTPUT_PATH)),
         DEFVAL(16),
         DEFVAL(4),
         DEFVAL(1)
@@ -126,7 +126,7 @@ Dictionary RayTraceExporter::render_scene_to_png(Node* root,
                                                  int32_t max_depth,
                                                  int64_t seed) {
     const int32_t normalized_spp = std::max(samples_per_pixel, 1);
-    const String save_path = output_path.is_empty() ? DEFAULT_OUTPUT_PATH : output_path;
+    const String save_path = output_path.is_empty() ? String(DEFAULT_OUTPUT_PATH) : output_path;
 
     if (root == nullptr) {
         return make_result(false, save_path, "No edited scene root.", image_size, normalized_spp);

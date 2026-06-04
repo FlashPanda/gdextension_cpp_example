@@ -1,6 +1,6 @@
 ---
 name: godot-gdextension-cpp
-description: Bilingual project guidance for this Godot GDExtension C++ renderer. Use when modifying C++ extension code, Godot bindings, build scripts, scene extraction, rendering, film accumulation, acceleration structures, or CPU path tracing behavior.
+description: 该项目的 Godot GDExtension C++ 渲染器开发指南。用于修改 C++ 扩展代码、Godot 绑定、构建脚本、场景提取、渲染、film 累积、加速结构或 CPU 路径追踪行为。
 ---
 
 # Godot GDExtension C++ Renderer Skill
@@ -11,6 +11,12 @@ description: Bilingual project guidance for this Godot GDExtension C++ renderer.
 
 当修改代码的时候，检查当前skill文件中是否需要做必要的修改。
 
+### 硬性约束
+
+- 禁止修改 `godot-cpp/` 下的任何文件，包括生成文件、API dump、binding generator、构建产物和缓存。如果任务看起来必须修改这里，先说明阻塞点并请求用户改变这条规则。
+- 禁止为本项目编写、创建或编辑 Python 代码。不要添加 Python 辅助脚本；改动应限制在 C++、GDScript、Godot 项目文件和已有的非 Python 项目配置中。
+- 禁止编译项目、运行项目、启动 Godot、运行测试或执行示例，除非用户在当前请求中明确要求。仅在明确要求时才执行 SCons、CMake、Godot、测试命令或其他会构建/运行项目的命令。
+
 ### 项目结构
 
 - `src/` 存放 GDExtension C++ 源码。
@@ -19,7 +25,7 @@ description: Bilingual project guidance for this Godot GDExtension C++ renderer.
 - `src/render/` 存放 `CpuPathTracer`、`Film`、tile/pass 累积等渲染管线代码。
 - `src/accel/` 存放加速结构接口和交叉测试抽象。
 - `project/` 存放 Godot 工程文件。
-- `godot-cpp/` 是 Godot C++ 绑定依赖，避免随意改动。
+- `godot-cpp/` 是 Godot C++ 绑定依赖，绝对禁止改动。
 - `SConstruct` 是主要构建入口；`CMakeLists.txt` 主要用于 IDE/索引辅助。
 
 ### GDExtension 开发
@@ -58,61 +64,6 @@ description: Bilingual project guidance for this Godot GDExtension C++ renderer.
 ### 风格
 
 - 使用 C++17，保持现有命名、目录和 include 风格。
-- 不随意重构 `godot-cpp/`。
+- 禁止任意形式的重构 `godot-cpp/`。
 - 只在必要处添加简短注释，优先让类型和函数边界说明意图。
 
-## English Notes
-
-Follow these rules when working on this project.
-
-When modifying code, check whether the current skill file needs any necessary updates.
-
-### Project Layout
-
-- `src/` contains the GDExtension C++ source code.
-- `src/core/` contains core rendering types for rays, materials, cameras, RNG, math, and color.
-- `src/scene/` contains Godot-to-render-scene extraction logic.
-- `src/render/` contains `CpuPathTracer`, `Film`, and tile/pass accumulation code.
-- `src/accel/` contains acceleration interface and intersection abstractions.
-- `project/` contains the Godot project files.
-- `godot-cpp/` is the Godot C++ binding dependency; avoid editing it unless explicitly required.
-- `SConstruct` is the main build entrypoint; `CMakeLists.txt` is mainly for IDE/indexing support.
-
-### GDExtension Development
-
-- Use `GDCLASS` for Godot-exposed classes and bind methods, properties, and signals in `_bind_methods()`.
-- After adding a new Godot-visible class, check whether `src/register_types.cpp` needs registration updates.
-- After changing Godot-visible APIs, verify `.gdextension`, scenes, and scripts still reference the correct classes and methods.
-- Keep engine integration and performance-sensitive behavior in C++; ordinary scene-control behavior can stay in GDScript.
-
-### Rendering And Path Tracing
-
-- Keep `Scene` simple: it currently owns triangles and materials only; when adding data, update extraction, acceleration, and integrator usage together.
-- When changing `Triangle`, `Material`, `Camera`, or `Hit`, check the effects on `SceneExtractor`, `CpuPathTracer`, and `AccelInterface`.
-- `CpuPathTracer::reset()` normalizes settings, resets film/tile accumulation, and rebuilds the acceleration structure when one exists.
-- Preserve progressive rendering semantics in `render_next_tile()`: take one tile, render it, then optionally return the tile to the caller.
-- Keep random sampling in `render_tile()` reproducible: derive seeds from pixel, pass, sample, and base seed.
-- Avoid self-intersection in `trace_path()`; keep the ray epsilon strategy or replace it deliberately.
-- When adding BRDFs, direct lighting, Russian roulette, MIS, mirror, or dielectric materials, update throughput, PDFs, normal orientation, and termination rules explicitly.
-- `Film` stores radiance sums and sample counts; do not destroy raw accumulation data when adding output, tone mapping, or denoising logic.
-- Acceleration structures must satisfy `AccelInterface::build()`, `intersect()`, and `intersect_p()` semantics; `intersect()` should fill a valid `Hit`, `t`, normal, materialId, and triangleIndex.
-
-### Scene Extraction
-
-- `SceneExtractor` only accepts mesh surfaces that can become triangles; define skip or conversion rules when adding primitive support.
-- Keep world-space positions, inverse-transpose normals, UVs, and materialId consistent during mesh extraction.
-- Materials are extracted from `BaseMaterial3D` as albedo, roughness, and emission; when adding material properties, update both `Material` and path tracing logic.
-- Prefer the current perspective camera; when changing camera extraction, preserve FOV-axis and Godot keep-aspect behavior.
-
-### Build And Validation
-
-- Prefer SCons for building the extension, with outputs under `project/bin/`.
-- For rendering, math, or scene extraction changes, run the smallest useful compile check first.
-- For path tracing behavior changes, check at least: empty scenes, missing acceleration structures, zero-size/invalid settings, emissive materials, invalid materialId, missing normal/UV data, and tile boundaries.
-- Avoid unnecessary allocation in per-sample or per-bounce hot paths for performance-sensitive changes.
-
-### Style
-
-- Use C++17 and match the existing naming, folder, and include style.
-- Do not refactor `godot-cpp/` casually.
-- Add short comments only where they clarify non-obvious logic; prefer clear types and function boundaries.

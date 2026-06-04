@@ -8,13 +8,13 @@
 
 config_version=5
 
-[editor_plugins]
-
-enabled=PackedStringArray("res://addons/raytrace_exporter/plugin.cfg")
-
 [application]
 
 config/name="project"
 run/main_scene="uid://crvpo2mn4wxlb"
 config/features=PackedStringArray("4.4", "Forward Plus")
 config/icon="res://icon.svg"
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/raytrace_exporter/plugin.cfg")
