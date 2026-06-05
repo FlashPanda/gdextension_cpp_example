@@ -1,8 +1,8 @@
 @tool
 extends EditorPlugin
 
-const OUTPUT_PATH := "res://raytrace_output/current_scene.png"
-const SAMPLES_PER_PIXEL := 16
+const OUTPUT_PATH := ""
+const SAMPLES_PER_PIXEL := 1
 const MAX_DEPTH := 4
 const SEED := 1
 const NO_JOB_ID := 0

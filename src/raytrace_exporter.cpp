@@ -3,7 +3,9 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstdio>
 #include <cstdint>
+#include <ctime>
 #include <memory>
 #include <mutex>
 #include <thread>
@@ -27,15 +29,24 @@ using namespace godot;
 
 namespace {
 
+    // 本文件的匿名命名空间集中放置 RayTraceExporter 的私有实现：
+    // 包括渲染请求/结果的数据快照、同步与异步共用的 helper、耗时日志、
+    // 以及跨 Godot 调用保存的后台渲染任务表。这里的符号不暴露给 GDExtension API。
     constexpr int TILE_SIZE = 16;
-    constexpr const char DEFAULT_OUTPUT_PATH[] = "res://raytrace_output/current_scene.png";
+    constexpr const char DEFAULT_OUTPUT_DIR[] = "res://raytrace_output";
+    constexpr const char DEFAULT_OUTPUT_PREFIX[] = "current_scene";
+    constexpr const char LEGACY_DEFAULT_OUTPUT_PATH[] = "res://raytrace_output/current_scene.png";
     using TimingClock = std::chrono::steady_clock;
 
+    // 单个阶段的耗时记录。name 使用字符串常量，避免在渲染热路径中额外分配。
     struct TimingEntry {
         const char* name = "";
         double elapsed_ms = 0.0;
     };
 
+    // RenderRequest 是一次渲染提交时的完整快照。
+    // 场景、相机、settings 和输出路径在主线程准备好后传入渲染流程；
+    // 异步渲染时 worker 只读取这份快照，避免继续依赖 Godot 场景树的实时状态。
     struct RenderRequest {
         godot_rt::Scene scene;
         godot_rt::Camera camera;
@@ -46,6 +57,9 @@ namespace {
         std::vector<TimingEntry> timing_entries;
     };
 
+    // RenderOutcome 记录渲染结束或提前失败后的结果。
+    // 它同时服务同步返回值、异步轮询状态和 timing log，因此保留了路径、
+    // 图像参数、tile 进度、错误信息和各阶段耗时。
     struct RenderOutcome {
         bool ok = false;
         bool cancelled = false;
@@ -61,6 +75,9 @@ namespace {
         std::vector<TimingEntry> timing_entries;
     };
 
+    // RenderJob 保存一个后台渲染任务的跨调用状态。
+    // 原子字段用于 worker 与 Godot 主线程之间的轻量通信；outcome 由 result_mutex 保护，
+    // 因为完成状态、轮询和释放可能从不同的 Godot 调用路径访问它。
     struct RenderJob {
         int64_t id = 0;
         RenderRequest request;
@@ -74,11 +91,16 @@ namespace {
         RenderOutcome outcome;
     };
 
+    // 全局任务表保存仍可被 poll/cancel/release 访问的后台任务。
+    // g_jobs_mutex 保护任务表结构，g_timing_log_mutex 避免多个渲染同时追加同一个日志文件。
     std::mutex g_jobs_mutex;
     std::mutex g_timing_log_mutex;
     std::unordered_map<int64_t, std::shared_ptr<RenderJob>> g_render_jobs;
     std::atomic<int64_t> g_next_job_id{1};
+    std::atomic<int64_t> g_next_output_sequence{1};
 
+    // 统一生成返回给 GDScript/编辑器侧的基础结果字典。
+    // 字段名保持稳定，调用方可以用 ok/error 判断失败，用 path/timing_log_path 找到产物。
     Dictionary make_result(bool ok,
                            const String& path,
                            const String& error,
@@ -96,6 +118,8 @@ namespace {
         return result;
     }
 
+    // 异步任务的返回值在基础结果上增加任务生命周期字段。
+    // exists/done/cancelled/progress 用于编辑器 UI 轮询，不要求调用方读取内部 job 状态。
     Dictionary make_job_result(int64_t job_id,
                                bool exists,
                                bool done,
@@ -116,6 +140,7 @@ namespace {
         return result;
     }
 
+    // 所有找不到 job 的路径都返回同一种状况，减少脚本侧分支处理。
     Dictionary make_missing_job_result(int64_t job_id) {
         return make_job_result(job_id, false, true, false, 0.0, false, String(),
                                "Render job not found.", Vector2i(0, 0), 1, String());
@@ -138,6 +163,7 @@ namespace {
                ceil_div(std::max(image_size.y, 0), TILE_SIZE);
     }
 
+    // timing helper 只记录毫秒级耗时，既用于同步渲染，也用于后台 worker。
     double elapsed_ms(TimingClock::time_point start, TimingClock::time_point end = TimingClock::now()) {
         return std::chrono::duration<double, std::milli>(end - start).count();
     }
@@ -150,6 +176,67 @@ namespace {
         timings->push_back(TimingEntry{name, milliseconds});
     }
 
+    bool fill_local_time(std::time_t time, std::tm* out_time) {
+        if (out_time == nullptr) {
+            return false;
+        }
+
+#ifdef _WIN32
+        return localtime_s(out_time, &time) == 0;
+#else
+        return localtime_r(&time, out_time) != nullptr;
+#endif
+    }
+
+    // 默认输出路径按点击时间生成唯一 PNG 名称，避免多次导出覆盖 current_scene.png。
+    // 同一毫秒内的极端连续提交用原子序号区分，文件名只包含路径安全字符。
+    String make_unique_default_output_path() {
+        const auto now = std::chrono::system_clock::now();
+        const auto milliseconds_since_epoch = std::chrono::duration_cast<std::chrono::milliseconds>(
+            now.time_since_epoch()
+        );
+        const int milliseconds = static_cast<int>(milliseconds_since_epoch.count() % 1000);
+        const std::time_t now_time = std::chrono::system_clock::to_time_t(now);
+        std::tm local_time = {};
+        fill_local_time(now_time, &local_time);
+
+        const int sequence = static_cast<int>(
+            g_next_output_sequence.fetch_add(1, std::memory_order_relaxed) % 1000000
+        );
+
+        char path[160];
+        const int written = std::snprintf(
+            path,
+            sizeof(path),
+            "%s/%s_%04d%02d%02d_%02d%02d%02d_%03d_%06d.png",
+            DEFAULT_OUTPUT_DIR,
+            DEFAULT_OUTPUT_PREFIX,
+            local_time.tm_year + 1900,
+            local_time.tm_mon + 1,
+            local_time.tm_mday,
+            local_time.tm_hour,
+            local_time.tm_min,
+            local_time.tm_sec,
+            milliseconds,
+            sequence
+        );
+        if (written <= 0 || written >= static_cast<int>(sizeof(path))) {
+            return String(DEFAULT_OUTPUT_DIR) + String("/") + String(DEFAULT_OUTPUT_PREFIX) + String("_") +
+                   String::num_int64(sequence) + String(".png");
+        }
+
+        return String(path);
+    }
+
+    String resolve_output_path(const String& output_path) {
+        if (output_path.is_empty() || output_path == String(LEGACY_DEFAULT_OUTPUT_PATH)) {
+            return make_unique_default_output_path();
+        }
+
+        return output_path;
+    }
+
+    // timing log 默认与输出 PNG 同名，便于用户从渲染产物反查性能记录。
     String make_timing_log_path(const String& output_path) {
         const String basename = output_path.get_basename();
         if (basename.is_empty()) {
@@ -159,6 +246,7 @@ namespace {
         return basename + String(".timings.log");
     }
 
+    // timing log 中使用稳定的短状态名，避免把 Godot Dictionary 的字段格式耦合到日志文本。
     const char* status_name(const RenderOutcome& outcome) {
         if (outcome.ok) {
             return "ok";
@@ -169,6 +257,8 @@ namespace {
         return "error";
     }
 
+    // 将 Godot 的 Camera3D 转成渲染器内部相机。
+    // 这里保留 Godot keep-aspect 选择的 FOV 轴向，否则导出的视角会和编辑器视口不一致。
     godot_rt::Camera make_render_camera(const Camera3D* camera) {
         godot_rt::Camera render_camera;
         render_camera.camera_to_world = camera->get_camera_transform();
@@ -179,6 +269,8 @@ namespace {
         return render_camera;
     }
 
+    // 保存 PNG 前先确保目标目录存在；失败信息通过 error 返回给 Dictionary。
+    // output_path 可以是 res:// 这样的 Godot 路径，因此使用 DirAccess 的 absolute helper。
     bool ensure_output_dir(const String& output_path, String* error) {
         const String output_dir = output_path.get_base_dir();
         if (output_dir.is_empty()) {
@@ -196,6 +288,8 @@ namespace {
         return true;
     }
 
+    // 将 Film 中的线性 radiance 均值写入 RGBA8 Image。
+    // 当前导出路径只做 0..1 clamp，不在这里引入 tone mapping，以免改变 Film 的原始累积语义。
     Ref<Image> film_to_image(const godot_rt::Film& film, const Vector2i& image_size) {
         Ref<Image> image = Image::create_empty(image_size.x, image_size.y, false, Image::FORMAT_RGBA8);
         if (image.is_null()) {
@@ -216,6 +310,8 @@ namespace {
         return image;
     }
 
+    // 初始 outcome 用于异步任务刚创建、尚未完成时的轮询结果。
+    // 它复制请求中的静态信息，让 UI 能在 worker 产出最终结果前显示尺寸、路径和总 tile 数。
     RenderOutcome make_initial_outcome(const RenderRequest& request) {
         RenderOutcome outcome;
         outcome.path = request.save_path;
@@ -228,6 +324,8 @@ namespace {
         return outcome;
     }
 
+    // 追加写入一次渲染的耗时日志。
+    // 多个同步/异步渲染可能写同一个文件，因此用全局日志锁串行化文件打开、seek 和写入。
     void write_timing_log(const RenderRequest& request, const RenderOutcome& outcome, const char* mode) {
         if (request.timing_log_path.is_empty()) {
             return;
@@ -275,6 +373,9 @@ namespace {
         file->close();
     }
 
+    // 准备渲染请求是同步和异步入口的共同前置阶段：
+    // 先校验 Godot 侧输入，再创建输出目录、提取场景，最后归一化相机和渲染 settings。
+    // 失败时直接构造对外 Dictionary，避免调用方再根据内部状态推断错误。
     bool prepare_render_request(Node* root,
                                 Camera3D* camera,
                                 Vector2i image_size,
@@ -288,7 +389,7 @@ namespace {
         std::vector<TimingEntry> timing_entries;
         const auto validate_start = TimingClock::now();
         const int32_t normalized_spp = std::max(samples_per_pixel, 1);
-        const String save_path = output_path.is_empty() ? String(DEFAULT_OUTPUT_PATH) : output_path;
+        const String save_path = resolve_output_path(output_path);
         const String timing_log_path = make_timing_log_path(save_path);
 
         if (root == nullptr) {
@@ -361,6 +462,8 @@ namespace {
         return true;
     }
 
+    // 以固定 TILE_SIZE 扫描整张图并逐块渲染。
+    // 取消检查放在每个 tile 前，让后台渲染可以在较短时间内响应 cancel_render_job。
     bool render_one_pass(godot_rt::CpuPathTracer& tracer,
                          const Vector2i& image_size,
                          const std::atomic_bool* cancel_requested,
@@ -389,6 +492,8 @@ namespace {
         return true;
     }
 
+    // 执行真正的渲染管线：reset tracer、设置加速结构、渲染 tile、把 Film 转 Image 并保存 PNG。
+    // 所有提前返回都会补齐 outcome、写 timing log，保证同步和异步路径的失败信息一致。
     RenderOutcome execute_render_request(const RenderRequest& request,
                                          const char* mode,
                                          const std::atomic_bool* cancel_requested,
@@ -461,6 +566,7 @@ namespace {
         return outcome;
     }
 
+    // 异步入口在前置校验失败时仍返回 job 字段，方便脚本侧复用同一套状态读取逻辑。
     Dictionary make_validation_job_error(Dictionary error_result) {
         error_result["job_id"] = 0;
         error_result["exists"] = false;
@@ -470,6 +576,8 @@ namespace {
         return error_result;
     }
 
+    // 从 RenderJob 生成当前轮询结果。
+    // outcome 可能正在 worker 完成阶段被写入，因此复制 outcome 时需要短暂持有 result_mutex。
     Dictionary make_running_job_result(const std::shared_ptr<RenderJob>& job) {
         RenderOutcome outcome;
         {
@@ -494,6 +602,8 @@ namespace {
                                outcome.timing_log_path);
     }
 
+    // 调用方已经持有 g_jobs_mutex 时使用这个 helper。
+    // 如果 worker 已结束，则在这里 join，避免线程对象在任务仍保留时长期处于 joinable 状态。
     Dictionary make_job_status_locked(const std::shared_ptr<RenderJob>& job) {
         if (job->done.load(std::memory_order_acquire) && job->worker.joinable()) {
             job->worker.join();
@@ -504,15 +614,16 @@ namespace {
 
 } // namespace
 
+// 绑定给 Godot 的静态方法保持薄包装：参数、默认值和返回 Dictionary 形状都在这里固定。
 void RayTraceExporter::_bind_methods() {
     ClassDB::bind_static_method(
         "RayTraceExporter",
         D_METHOD("render_scene_to_png", "root", "camera", "image_size", "output_path",
                  "samples_per_pixel", "max_depth", "seed"),
         &RayTraceExporter::render_scene_to_png,
-        DEFVAL(String(DEFAULT_OUTPUT_PATH)),
-        DEFVAL(16),
-        DEFVAL(4),
+        DEFVAL(String()),
+        DEFVAL(1),
+        DEFVAL(2),
         DEFVAL(1)
     );
     ClassDB::bind_static_method(
@@ -520,9 +631,9 @@ void RayTraceExporter::_bind_methods() {
         D_METHOD("start_render_scene_to_png", "root", "camera", "image_size", "output_path",
                  "samples_per_pixel", "max_depth", "seed"),
         &RayTraceExporter::start_render_scene_to_png,
-        DEFVAL(String(DEFAULT_OUTPUT_PATH)),
-        DEFVAL(16),
-        DEFVAL(4),
+        DEFVAL(String()),
+        DEFVAL(1),
+        DEFVAL(2),
         DEFVAL(1)
     );
     ClassDB::bind_static_method(
@@ -542,6 +653,8 @@ void RayTraceExporter::_bind_methods() {
     );
 }
 
+// 同步导出当前场景到 PNG。
+// 这个路径会在调用线程完成全部工作，适合简单脚本调用或不需要进度 UI 的场景。
 Dictionary RayTraceExporter::render_scene_to_png(Node* root,
                                                  Camera3D* camera,
                                                  Vector2i image_size,
@@ -562,6 +675,8 @@ Dictionary RayTraceExporter::render_scene_to_png(Node* root,
                        outcome.timing_log_path);
 }
 
+// 启动后台渲染任务并立即返回 job_id。
+// worker 创建后先等待 worker_can_start，确保主线程已经把 job 放进全局表并初始化 outcome。
 Dictionary RayTraceExporter::start_render_scene_to_png(Node* root,
                                                        Camera3D* camera,
                                                        Vector2i image_size,
@@ -584,6 +699,7 @@ Dictionary RayTraceExporter::start_render_scene_to_png(Node* root,
     job->total_tiles = total_tile_count(request.settings.image_size);
 
     job->worker = std::thread([job]() {
+        // 等主线程完成任务登记后再开始渲染，避免极快失败时 poll/release 看不到 job。
         while (!job->worker_can_start.load(std::memory_order_acquire)) {
             std::this_thread::yield();
         }
@@ -609,6 +725,8 @@ Dictionary RayTraceExporter::start_render_scene_to_png(Node* root,
                            request.settings.image_size, request.settings.samples_per_pixel, request.timing_log_path);
 }
 
+// 查询后台任务状态。
+// jobs_lock 保护任务表查找；单个 job 的 outcome 在 helper 中再用 result_mutex 保护。
 Dictionary RayTraceExporter::poll_render_job(int64_t job_id) {
     std::lock_guard<std::mutex> jobs_lock(g_jobs_mutex);
     const auto it = g_render_jobs.find(job_id);
@@ -619,6 +737,8 @@ Dictionary RayTraceExporter::poll_render_job(int64_t job_id) {
     return make_job_status_locked(it->second);
 }
 
+// 请求取消后台任务。
+// 取消是协作式的：这里只设置原子标记，worker 会在下一个 tile 前观察并提前结束。
 Dictionary RayTraceExporter::cancel_render_job(int64_t job_id) {
     std::lock_guard<std::mutex> jobs_lock(g_jobs_mutex);
     const auto it = g_render_jobs.find(job_id);
@@ -630,6 +750,8 @@ Dictionary RayTraceExporter::cancel_render_job(int64_t job_id) {
     return make_job_status_locked(it->second);
 }
 
+// 释放已完成的后台任务。
+// 仍在运行的任务不会被移除，避免丢失 worker 和取消入口；完成后先从表里摘除，再在锁外 join。
 Dictionary RayTraceExporter::release_render_job(int64_t job_id) {
     std::shared_ptr<RenderJob> job;
     {
@@ -661,6 +783,8 @@ Dictionary RayTraceExporter::release_render_job(int64_t job_id) {
     return result;
 }
 
+// 扩展卸载或退出时清理所有后台任务。
+// 先在锁内请求取消并复制 shared_ptr，再清空任务表；随后在锁外 join，避免阻塞期间卡住 poll/cancel。
 void RayTraceExporter::shutdown_render_jobs() {
     std::vector<std::shared_ptr<RenderJob>> jobs;
     {
