@@ -23,6 +23,7 @@ namespace godot_rt {
         int samples_per_pixel = 1;
         int max_depth = 4;
         std::uint64_t seed = 1;
+        bool single_ray_mode = false;
     };
 
     class CpuPathTracer {
@@ -34,6 +35,7 @@ namespace godot_rt {
 
         bool render_next_tile(Tile* out_tile = nullptr);
         void render_tile(const Tile& tile);
+        bool render_single_ray(const Tile& tile);
         godot::Color trace_path(const Ray& ray, Rng& rng) const;
         godot::Color trace_path(const RayDifferential& ray, Rng& rng) const;
 
@@ -43,13 +45,16 @@ namespace godot_rt {
         const Scene& get_scene() const;
         const Camera& get_camera() const;
         const CpuPathTracerSettings& get_settings() const;
+        const RenderStatistics& get_statistics() const;
 
     private:
         void rebuild_integrator();
+        void render_sample(godot::Vector2i pixel, int pass_index, int sample_index);
 
         Scene scene;
         Camera camera;
         CpuPathTracerSettings settings;
+        RenderStatistics render_statistics;
         Film film;
         FrameAccumulator frame_accumulator;
         std::unique_ptr<AccelInterface> accel;

@@ -25,7 +25,8 @@ namespace godot {
             const String& output_path,
             int32_t samples_per_pixel,
             int32_t max_depth,
-            int64_t seed
+            int64_t seed,
+            bool single_ray_mode = false
         );
         static Dictionary start_render_scene_to_png(
             Node* root,
@@ -34,7 +35,8 @@ namespace godot {
             const String& output_path,
             int32_t samples_per_pixel,
             int32_t max_depth,
-            int64_t seed
+            int64_t seed,
+            bool single_ray_mode = false
         );
         static Dictionary poll_render_job(int64_t job_id);
         static Dictionary cancel_render_job(int64_t job_id);

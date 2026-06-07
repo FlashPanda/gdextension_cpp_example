@@ -17,6 +17,10 @@ namespace godot_rt {
 
     class AccelInterface;
 
+    struct RenderStatistics {
+        double intersection_ms = 0.0;
+    };
+
     class Integrator {
     public:
         virtual ~Integrator();
@@ -25,7 +29,8 @@ namespace godot_rt {
             const godot::String& name,
             const Scene* scene,
             AccelInterface* accel,
-            int max_depth
+            int max_depth,
+            RenderStatistics* statistics = nullptr
         );
 
         virtual godot::String to_string() const = 0;
@@ -40,21 +45,28 @@ namespace godot_rt {
         void set_max_depth(int new_max_depth);
 
     protected:
-        Integrator(const Scene* scene, AccelInterface* accel, int max_depth);
+        Integrator(const Scene* scene, AccelInterface* accel, int max_depth, RenderStatistics* statistics);
 
         const Scene* scene = nullptr;
         AccelInterface* aggregate = nullptr;
+        RenderStatistics* statistics = nullptr;
         int max_depth = 0;
     };
 
     class RandomWalkIntegrator final : public Integrator {
     public:
-        RandomWalkIntegrator(const Scene* scene, AccelInterface* accel, int max_depth);
+        RandomWalkIntegrator(
+            const Scene* scene,
+            AccelInterface* accel,
+            int max_depth,
+            RenderStatistics* statistics = nullptr
+        );
 
         static std::unique_ptr<RandomWalkIntegrator> create(
             const Scene* scene,
             AccelInterface* accel,
-            int max_depth
+            int max_depth,
+            RenderStatistics* statistics = nullptr
         );
 
         godot::String to_string() const final;

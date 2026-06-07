@@ -40,6 +40,7 @@ void CpuPathTracer::reset(const Scene& new_scene, const Camera& new_camera, CpuP
     scene = new_scene;
     camera = new_camera;
     settings = new_settings;
+    render_statistics = RenderStatistics();
 
     film.resize(settings.image_size);
     frame_accumulator.resize(settings.image_size, settings.tile_size);
@@ -81,18 +82,24 @@ void CpuPathTracer::render_tile(const Tile& tile) {
         for (int x = x_begin; x < x_end; ++x) {
             const godot::Vector2i pixel(x, y);
             for (int sample_index = 0; sample_index < settings.samples_per_pixel; ++sample_index) {
-                Rng rng(sample_seed(pixel, tile.pass_index, sample_index, settings.seed));
-                const godot::Vector2 jitter = rng.next_2d();
-                const godot::Vector2 pixel_sample(
-                    static_cast<float>(x) + jitter.x,
-                    static_cast<float>(y) + jitter.y
-                );
-
-                const RayDifferential ray = camera.generate_primary_ray_differential(pixel_sample, settings.image_size);
-                film.add_sample(pixel, trace_path(ray, rng));
+                render_sample(pixel, tile.pass_index, sample_index);
             }
         }
     }
+}
+
+bool CpuPathTracer::render_single_ray(const Tile& tile) {
+    const int x_begin = std::max(tile.origin.x, 0);
+    const int y_begin = std::max(tile.origin.y, 0);
+    const int x_end = std::min(tile.origin.x + tile.size.x, settings.image_size.x);
+    const int y_end = std::min(tile.origin.y + tile.size.y, settings.image_size.y);
+
+    if (x_begin >= x_end || y_begin >= y_end) {
+        return false;
+    }
+
+    render_sample(godot::Vector2i(x_begin, y_begin), tile.pass_index, 0);
+    return true;
 }
 
 godot::Color CpuPathTracer::trace_path(const Ray& ray, Rng& rng) const {
@@ -127,8 +134,24 @@ const CpuPathTracerSettings& CpuPathTracer::get_settings() const {
     return settings;
 }
 
+const RenderStatistics& CpuPathTracer::get_statistics() const {
+    return render_statistics;
+}
+
 void CpuPathTracer::rebuild_integrator() {
-    integrator = Integrator::create("random_walk", &scene, accel.get(), settings.max_depth);
+    integrator = Integrator::create("random_walk", &scene, accel.get(), settings.max_depth, &render_statistics);
+}
+
+void CpuPathTracer::render_sample(godot::Vector2i pixel, int pass_index, int sample_index) {
+    Rng rng(sample_seed(pixel, pass_index, sample_index, settings.seed));
+    const godot::Vector2 jitter = rng.next_2d();
+    const godot::Vector2 pixel_sample(
+        static_cast<float>(pixel.x) + jitter.x,
+        static_cast<float>(pixel.y) + jitter.y
+    );
+
+    const RayDifferential ray = camera.generate_primary_ray_differential(pixel_sample, settings.image_size);
+    film.add_sample(pixel, trace_path(ray, rng));
 }
 
 }

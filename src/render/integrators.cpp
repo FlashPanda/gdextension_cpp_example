@@ -1,6 +1,7 @@
 #include "integrators.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <vector>
 
@@ -11,6 +12,7 @@ namespace {
 
     constexpr float PI = 3.14159265358979323846f;
     constexpr float RAY_EPSILON = 0.0001f;
+    using TimingClock = std::chrono::steady_clock;
 
     godot::Color black() {
         return godot::Color(0.0f, 0.0f, 0.0f, 1.0f);
@@ -87,6 +89,10 @@ namespace {
         return direction;
     }
 
+    double elapsed_ms(TimingClock::time_point start) {
+        return std::chrono::duration<double, std::milli>(TimingClock::now() - start).count();
+    }
+
 }
 
 Integrator::~Integrator() = default;
@@ -95,24 +101,37 @@ std::unique_ptr<Integrator> Integrator::create(
     const godot::String& name,
     const Scene* scene,
     AccelInterface* accel,
-    int max_depth
+    int max_depth,
+    RenderStatistics* statistics
 ) {
     (void)name;
-    return RandomWalkIntegrator::create(scene, accel, max_depth);
+    return RandomWalkIntegrator::create(scene, accel, max_depth, statistics);
 }
 
 bool Integrator::intersect(const Ray& ray, Hit* hit, real_t t_max) const {
     if (aggregate == nullptr) {
         return false;
     }
-    return aggregate->intersect(ray, hit, t_max);
+
+    const auto intersect_start = TimingClock::now();
+    const bool result = aggregate->intersect(ray, hit, t_max);
+    if (statistics != nullptr) {
+        statistics->intersection_ms += elapsed_ms(intersect_start);
+    }
+    return result;
 }
 
 bool Integrator::intersect_p(const Ray& ray, real_t t_max) const {
     if (aggregate == nullptr) {
         return false;
     }
-    return aggregate->intersect_p(ray, t_max);
+
+    const auto intersect_start = TimingClock::now();
+    const bool result = aggregate->intersect_p(ray, t_max);
+    if (statistics != nullptr) {
+        statistics->intersection_ms += elapsed_ms(intersect_start);
+    }
+    return result;
 }
 
 bool Integrator::unoccluded(const Hit& p0, const Hit& p1) const {
@@ -139,23 +158,31 @@ void Integrator::set_max_depth(int new_max_depth) {
     max_depth = std::max(new_max_depth, 0);
 }
 
-Integrator::Integrator(const Scene* new_scene, AccelInterface* accel, int new_max_depth)
+Integrator::Integrator(
+    const Scene* new_scene,
+    AccelInterface* accel,
+    int new_max_depth,
+    RenderStatistics* new_statistics
+)
     : scene(new_scene),
       aggregate(accel),
+      statistics(new_statistics),
       max_depth(std::max(new_max_depth, 0)) {}
 
 RandomWalkIntegrator::RandomWalkIntegrator(
     const Scene* scene,
     AccelInterface* accel,
-    int max_depth
-) : Integrator(scene, accel, max_depth) {}
+    int max_depth,
+    RenderStatistics* statistics
+) : Integrator(scene, accel, max_depth, statistics) {}
 
 std::unique_ptr<RandomWalkIntegrator> RandomWalkIntegrator::create(
     const Scene* scene,
     AccelInterface* accel,
-    int max_depth
+    int max_depth,
+    RenderStatistics* statistics
 ) {
-    return std::make_unique<RandomWalkIntegrator>(scene, accel, max_depth);
+    return std::make_unique<RandomWalkIntegrator>(scene, accel, max_depth, statistics);
 }
 
 godot::String RandomWalkIntegrator::to_string() const {

@@ -8,11 +8,17 @@ const SEED := 1
 const NO_JOB_ID := 0
 
 var _button: Button
+var _single_ray_check_box: CheckBox
 var _active_job_id := NO_JOB_ID
 var _cancel_requested := false
 
 
 func _enter_tree() -> void:
+	_single_ray_check_box = CheckBox.new()
+	_single_ray_check_box.text = "Single Ray"
+	_single_ray_check_box.tooltip_text = "Render only the first sampled ray, save the PNG, and report timing."
+	add_control_to_container(EditorPlugin.CONTAINER_SPATIAL_EDITOR_MENU, _single_ray_check_box)
+
 	_button = Button.new()
 	_button.text = "Trace PNG"
 	_button.tooltip_text = "Render the current 3D editor view to a PNG."
@@ -32,6 +38,11 @@ func _exit_tree() -> void:
 		remove_control_from_container(EditorPlugin.CONTAINER_SPATIAL_EDITOR_MENU, _button)
 		_button.queue_free()
 		_button = null
+
+	if _single_ray_check_box != null:
+		remove_control_from_container(EditorPlugin.CONTAINER_SPATIAL_EDITOR_MENU, _single_ray_check_box)
+		_single_ray_check_box.queue_free()
+		_single_ray_check_box = null
 
 
 func _process(_delta: float) -> void:
@@ -64,6 +75,10 @@ func _process(_delta: float) -> void:
 	var ok := bool(result.get("ok", false))
 	var path := String(result.get("path", OUTPUT_PATH))
 	var timing_log_path := String(result.get("timing_log_path", ""))
+	var total_ms := float(result.get("total_ms", 0.0))
+	var single_ray_mode := bool(result.get("single_ray_mode", false))
+	var triangle_count := int(result.get("triangle_count", 0))
+	var intersection_ms := float(result.get("intersection_ms", 0.0))
 	var error := String(result.get("error", "unknown error"))
 
 	ClassDB.class_call_static(&"RayTraceExporter", &"release_render_job", job_id)
@@ -76,15 +91,21 @@ func _process(_delta: float) -> void:
 	if was_cancelled:
 		print("Ray trace PNG export cancelled.")
 		_print_timing_log_path(timing_log_path)
+		_print_elapsed_time(total_ms, single_ray_mode)
+		_print_render_statistics(triangle_count, intersection_ms)
 		return
 
 	if not ok:
 		push_error("Ray trace export failed: %s" % error)
 		_print_timing_log_path(timing_log_path)
+		_print_elapsed_time(total_ms, single_ray_mode)
+		_print_render_statistics(triangle_count, intersection_ms)
 		return
 
 	print("Ray trace PNG saved to %s" % path)
 	_print_timing_log_path(timing_log_path)
+	_print_elapsed_time(total_ms, single_ray_mode)
+	_print_render_statistics(triangle_count, intersection_ms)
 
 
 func _on_trace_pressed() -> void:
@@ -122,6 +143,7 @@ func _start_render_job() -> void:
 		push_error("Ray trace export failed: RayTraceExporter GDExtension is not loaded.")
 		return
 
+	var single_ray_mode := _single_ray_check_box != null and _single_ray_check_box.button_pressed
 	var result: Dictionary = ClassDB.class_call_static(
 		&"RayTraceExporter",
 		&"start_render_scene_to_png",
@@ -131,11 +153,18 @@ func _start_render_job() -> void:
 		OUTPUT_PATH,
 		SAMPLES_PER_PIXEL,
 		MAX_DEPTH,
-		SEED
+		SEED,
+		single_ray_mode
 	)
 
 	if not result.get("ok", false):
 		push_error("Ray trace export failed: %s" % result.get("error", "unknown error"))
+		_print_timing_log_path(String(result.get("timing_log_path", "")))
+		_print_elapsed_time(float(result.get("total_ms", 0.0)), bool(result.get("single_ray_mode", single_ray_mode)))
+		_print_render_statistics(
+			int(result.get("triangle_count", 0)),
+			float(result.get("intersection_ms", 0.0))
+		)
 		return
 
 	_active_job_id = int(result.get("job_id", NO_JOB_ID))
@@ -176,6 +205,8 @@ func _reset_job_state() -> void:
 	if _button != null:
 		_button.disabled = false
 		_button.text = "Trace PNG"
+	if _single_ray_check_box != null:
+		_single_ray_check_box.disabled = false
 
 
 func _update_button_progress(progress: float) -> void:
@@ -184,6 +215,8 @@ func _update_button_progress(progress: float) -> void:
 
 	var percent := int(round(clamp(progress, 0.0, 1.0) * 100.0))
 	_button.disabled = false
+	if _single_ray_check_box != null:
+		_single_ray_check_box.disabled = true
 	if _cancel_requested:
 		_button.text = "Cancelling %d%%" % percent
 	else:
@@ -193,3 +226,13 @@ func _update_button_progress(progress: float) -> void:
 func _print_timing_log_path(timing_log_path: String) -> void:
 	if not timing_log_path.is_empty():
 		print("Ray trace timing log saved to %s" % timing_log_path)
+
+
+func _print_elapsed_time(total_ms: float, single_ray_mode: bool) -> void:
+	var mode := "single ray" if single_ray_mode else "full trace"
+	print("Ray trace elapsed time (%s): %.3f ms" % [mode, total_ms])
+
+
+func _print_render_statistics(triangle_count: int, intersection_ms: float) -> void:
+	print("Ray trace triangles: %d" % triangle_count)
+	print("Ray trace intersection time: %.3f ms" % intersection_ms)
