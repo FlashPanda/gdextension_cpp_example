@@ -28,6 +28,12 @@ namespace godot {
             int64_t seed,
             bool single_ray_mode = false
         );
+        static Dictionary render_scene_to_png_with_options(
+            Node* root,
+            Camera3D* camera,
+            Vector2i image_size,
+            const Dictionary& options
+        );
         static Dictionary start_render_scene_to_png(
             Node* root,
             Camera3D* camera,
@@ -37,6 +43,12 @@ namespace godot {
             int32_t max_depth,
             int64_t seed,
             bool single_ray_mode = false
+        );
+        static Dictionary start_render_scene_to_png_with_options(
+            Node* root,
+            Camera3D* camera,
+            Vector2i image_size,
+            const Dictionary& options
         );
         static Dictionary poll_render_job(int64_t job_id);
         static Dictionary cancel_render_job(int64_t job_id);

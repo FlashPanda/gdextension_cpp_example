@@ -92,20 +92,20 @@ func _process(_delta: float) -> void:
 		print("Ray trace PNG export cancelled.")
 		_print_timing_log_path(timing_log_path)
 		_print_elapsed_time(total_ms, single_ray_mode)
-		_print_render_statistics(triangle_count, intersection_ms)
+		_print_render_statistics(triangle_count, intersection_ms, result)
 		return
 
 	if not ok:
 		push_error("Ray trace export failed: %s" % error)
 		_print_timing_log_path(timing_log_path)
 		_print_elapsed_time(total_ms, single_ray_mode)
-		_print_render_statistics(triangle_count, intersection_ms)
+		_print_render_statistics(triangle_count, intersection_ms, result)
 		return
 
 	print("Ray trace PNG saved to %s" % path)
 	_print_timing_log_path(timing_log_path)
 	_print_elapsed_time(total_ms, single_ray_mode)
-	_print_render_statistics(triangle_count, intersection_ms)
+	_print_render_statistics(triangle_count, intersection_ms, result)
 
 
 func _on_trace_pressed() -> void:
@@ -144,18 +144,37 @@ func _start_render_job() -> void:
 		return
 
 	var single_ray_mode := _single_ray_check_box != null and _single_ray_check_box.button_pressed
-	var result: Dictionary = ClassDB.class_call_static(
+	var render_options := {
+		"output_path": OUTPUT_PATH,
+		"samples_per_pixel": SAMPLES_PER_PIXEL,
+		"max_depth": MAX_DEPTH,
+		"seed": SEED,
+		"single_ray_mode": single_ray_mode
+	}
+
+	if not ClassDB.class_has_method(&"RayTraceExporter", &"start_render_scene_to_png_with_options"):
+		push_error(
+			"Ray trace export failed: RayTraceExporter.start_render_scene_to_png_with_options is not loaded. " +
+			"Rebuild the GDExtension and make sure project/bin/gdexample.gdextension points to that DLL."
+		)
+		return
+
+	var result_value = ClassDB.class_call_static(
 		&"RayTraceExporter",
-		&"start_render_scene_to_png",
+		&"start_render_scene_to_png_with_options",
 		root,
 		camera,
 		image_size,
-		OUTPUT_PATH,
-		SAMPLES_PER_PIXEL,
-		MAX_DEPTH,
-		SEED,
-		single_ray_mode
+		render_options
 	)
+	if not (result_value is Dictionary):
+		push_error(
+			"Ray trace export failed: native exporter returned %s instead of Dictionary." %
+			type_string(typeof(result_value))
+		)
+		return
+
+	var result: Dictionary = result_value
 
 	if not result.get("ok", false):
 		push_error("Ray trace export failed: %s" % result.get("error", "unknown error"))
@@ -163,7 +182,8 @@ func _start_render_job() -> void:
 		_print_elapsed_time(float(result.get("total_ms", 0.0)), bool(result.get("single_ray_mode", single_ray_mode)))
 		_print_render_statistics(
 			int(result.get("triangle_count", 0)),
-			float(result.get("intersection_ms", 0.0))
+			float(result.get("intersection_ms", 0.0)),
+			result
 		)
 		return
 
@@ -233,6 +253,43 @@ func _print_elapsed_time(total_ms: float, single_ray_mode: bool) -> void:
 	print("Ray trace elapsed time (%s): %.3f ms" % [mode, total_ms])
 
 
-func _print_render_statistics(triangle_count: int, intersection_ms: float) -> void:
+func _bool_text(value: bool) -> String:
+	return "true" if value else "false"
+
+
+func _print_render_statistics(triangle_count: int, intersection_ms: float, result: Dictionary) -> void:
 	print("Ray trace triangles: %d" % triangle_count)
+	print(
+		"Ray trace lights: %d (directional: %d, omni: %d, spot: %d, shadow: %d)" % [
+			int(result.get("light_count", 0)),
+			int(result.get("directional_light_count", 0)),
+			int(result.get("omni_light_count", 0)),
+			int(result.get("spot_light_count", 0)),
+			int(result.get("shadow_light_count", 0)),
+		]
+	)
+
+	var lights_value = result.get("lights", [])
+	if lights_value is Array:
+		for light_value in lights_value:
+			if not (light_value is Dictionary):
+				continue
+
+			var light: Dictionary = light_value
+			print(
+				"Ray trace light[%d]: type=%s energy=%.3f color=%s range=%.3f attenuation=%.3f spot_angle=%.3f spot_attenuation=%.3f casts_shadow=%s position=%s direction=%s" % [
+					int(light.get("index", 0)),
+					String(light.get("type", "")),
+					float(light.get("energy", 0.0)),
+					str(light.get("color", Color.BLACK)),
+					float(light.get("range", 0.0)),
+					float(light.get("attenuation", 0.0)),
+					float(light.get("spot_angle_degrees", 0.0)),
+					float(light.get("spot_attenuation", 0.0)),
+					_bool_text(bool(light.get("casts_shadow", false))),
+					str(light.get("position", Vector3.ZERO)),
+					str(light.get("direction", Vector3.ZERO)),
+				]
+			)
+
 	print("Ray trace intersection time: %.3f ms" % intersection_ms)

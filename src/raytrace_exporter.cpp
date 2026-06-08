@@ -17,6 +17,7 @@
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/core/math.hpp>
+#include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/color.hpp>
 
 #include "accel/brute_force_accel.h"
@@ -42,6 +43,29 @@ namespace {
     struct TimingEntry {
         const char* name = "";
         double elapsed_ms = 0.0;
+    };
+
+    struct LightRecord {
+        int32_t index = 0;
+        String type;
+        Color color;
+        double energy = 0.0;
+        double range = 0.0;
+        double attenuation = 0.0;
+        double spot_angle_degrees = 0.0;
+        double spot_attenuation = 0.0;
+        bool casts_shadow = false;
+        Vector3 position;
+        Vector3 direction;
+    };
+
+    struct LightStatistics {
+        int32_t light_count = 0;
+        int32_t directional_light_count = 0;
+        int32_t omni_light_count = 0;
+        int32_t spot_light_count = 0;
+        int32_t shadow_light_count = 0;
+        std::vector<LightRecord> lights;
     };
 
     // RenderRequest 是一次渲染提交时的完整快照。
@@ -70,6 +94,7 @@ namespace {
         int32_t samples_per_pixel = 1;
         int32_t max_depth = 0;
         int32_t triangle_count = 0;
+        LightStatistics light_statistics;
         bool single_ray_mode = false;
         int tiles_done = 0;
         int total_tiles = 0;
@@ -102,6 +127,127 @@ namespace {
     std::atomic<int64_t> g_next_job_id{1};
     std::atomic<int64_t> g_next_output_sequence{1};
 
+    const char* light_type_name(godot_rt::LightType type) {
+        switch (type) {
+            case godot_rt::LightType::Directional:
+                return "DirectionalLight";
+            case godot_rt::LightType::Omni:
+                return "OmniLight";
+            case godot_rt::LightType::Spot:
+                return "SpotLight";
+        }
+
+        return "Light";
+    }
+
+    Vector3 light_forward_direction(const godot_rt::Light& light) {
+        Vector3 direction = light.transform.basis.xform(Vector3(0.0f, 0.0f, -1.0f));
+        if (direction.length_squared() <= 0.0f) {
+            return Vector3(0.0f, 0.0f, -1.0f);
+        }
+
+        direction.normalize();
+        return direction;
+    }
+
+    // 光源统计在场景提取完成后立即变成一份纯数据快照。
+    // 这样同步返回、异步轮询和 timing log 都读取同一份结果，避免 worker 再触碰 Godot 场景树。
+    LightStatistics collect_light_statistics(const godot_rt::Scene& scene) {
+        LightStatistics statistics;
+        const std::vector<godot_rt::Light>& lights = scene.get_lights();
+        statistics.light_count = static_cast<int32_t>(lights.size());
+        statistics.lights.reserve(lights.size());
+
+        for (int32_t index = 0; index < static_cast<int32_t>(lights.size()); ++index) {
+            const godot_rt::Light& light = lights[index];
+
+            switch (light.type) {
+                case godot_rt::LightType::Directional:
+                    ++statistics.directional_light_count;
+                    break;
+                case godot_rt::LightType::Omni:
+                    ++statistics.omni_light_count;
+                    break;
+                case godot_rt::LightType::Spot:
+                    ++statistics.spot_light_count;
+                    break;
+            }
+
+            if (light.casts_shadow) {
+                ++statistics.shadow_light_count;
+            }
+
+            LightRecord record;
+            record.index = index;
+            record.type = String(light_type_name(light.type));
+            record.color = light.color;
+            record.energy = static_cast<double>(light.energy);
+            record.range = static_cast<double>(light.range);
+            record.attenuation = static_cast<double>(light.attenuation);
+            record.spot_angle_degrees = static_cast<double>(Math::rad_to_deg(light.spot_angle_radians));
+            record.spot_attenuation = static_cast<double>(light.spot_attenuation);
+            record.casts_shadow = light.casts_shadow;
+            record.position = light.transform.origin;
+            record.direction = light_forward_direction(light);
+            statistics.lights.push_back(record);
+        }
+
+        return statistics;
+    }
+
+    Dictionary make_light_record_dictionary(const LightRecord& light) {
+        Dictionary result;
+        result["index"] = light.index;
+        result["type"] = light.type;
+        result["color"] = light.color;
+        result["energy"] = light.energy;
+        result["range"] = light.range;
+        result["attenuation"] = light.attenuation;
+        result["spot_angle_degrees"] = light.spot_angle_degrees;
+        result["spot_attenuation"] = light.spot_attenuation;
+        result["casts_shadow"] = light.casts_shadow;
+        result["position"] = light.position;
+        result["direction"] = light.direction;
+        return result;
+    }
+
+    Array make_light_array(const LightStatistics& statistics) {
+        Array lights;
+        for (const LightRecord& light : statistics.lights) {
+            lights.push_back(make_light_record_dictionary(light));
+        }
+        return lights;
+    }
+
+    // 返回字典中的光源字段保持扁平汇总 + lights 明细数组，方便脚本侧只读需要的粒度。
+    void add_light_statistics_to_result(Dictionary& result, const LightStatistics& statistics) {
+        result["light_count"] = statistics.light_count;
+        result["directional_light_count"] = statistics.directional_light_count;
+        result["omni_light_count"] = statistics.omni_light_count;
+        result["spot_light_count"] = statistics.spot_light_count;
+        result["shadow_light_count"] = statistics.shadow_light_count;
+        result["lights"] = make_light_array(statistics);
+    }
+
+    String format_bool(bool value) {
+        return value ? String("true") : String("false");
+    }
+
+    String format_vector3(const Vector3& value) {
+        return String("(") +
+               String::num(value.x, 3) + ", " +
+               String::num(value.y, 3) + ", " +
+               String::num(value.z, 3) + ")";
+    }
+
+    String format_color(const Color& value) {
+        return String("(") +
+               String::num(value.r, 3) + ", " +
+               String::num(value.g, 3) + ", " +
+               String::num(value.b, 3) + ", " +
+               String::num(value.a, 3) + ")";
+    }
+
     // 统一生成返回给 GDScript/编辑器侧的基础结果字典。
     // 字段名保持稳定，调用方可以用 ok/error 判断失败，用 path/timing_log_path 找到产物。
     Dictionary make_result(bool ok,
@@ -113,6 +259,7 @@ namespace {
                            double total_ms,
                            bool single_ray_mode,
                            int32_t triangle_count,
+                           const LightStatistics& light_statistics,
                            double intersection_ms) {
         Dictionary result;
         result["ok"] = ok;
@@ -125,6 +272,7 @@ namespace {
         result["total_ms"] = total_ms;
         result["single_ray_mode"] = single_ray_mode;
         result["triangle_count"] = triangle_count;
+        add_light_statistics_to_result(result, light_statistics);
         result["intersection_ms"] = intersection_ms;
         return result;
     }
@@ -145,9 +293,11 @@ namespace {
                                double total_ms,
                                bool single_ray_mode,
                                int32_t triangle_count,
+                               const LightStatistics& light_statistics,
                                double intersection_ms) {
         Dictionary result = make_result(ok, path, error, image_size, samples_per_pixel, timing_log_path,
-                                        total_ms, single_ray_mode, triangle_count, intersection_ms);
+                                        total_ms, single_ray_mode, triangle_count, light_statistics,
+                                        intersection_ms);
         result["job_id"] = job_id;
         result["exists"] = exists;
         result["done"] = done;
@@ -159,7 +309,8 @@ namespace {
     // 所有找不到 job 的路径都返回同一种状况，减少脚本侧分支处理。
     Dictionary make_missing_job_result(int64_t job_id) {
         return make_job_result(job_id, false, true, false, 0.0, false, String(),
-                               "Render job not found.", Vector2i(0, 0), 1, String(), 0.0, false, 0, 0.0);
+                               "Render job not found.", Vector2i(0, 0), 1, String(), 0.0, false, 0,
+                               LightStatistics(), 0.0);
     }
 
     float clamp01(float value) {
@@ -177,6 +328,26 @@ namespace {
     int total_tile_count(const Vector2i& image_size) {
         return ceil_div(std::max(image_size.x, 0), TILE_SIZE) *
                ceil_div(std::max(image_size.y, 0), TILE_SIZE);
+    }
+
+    String get_string_option(const Dictionary& options, const char* key, const String& default_value) {
+        const String option_key(key);
+        return options.has(option_key) ? static_cast<String>(options[option_key]) : default_value;
+    }
+
+    int32_t get_int_option(const Dictionary& options, const char* key, int32_t default_value) {
+        const String option_key(key);
+        return options.has(option_key) ? static_cast<int32_t>(static_cast<int64_t>(options[option_key])) : default_value;
+    }
+
+    int64_t get_int64_option(const Dictionary& options, const char* key, int64_t default_value) {
+        const String option_key(key);
+        return options.has(option_key) ? static_cast<int64_t>(options[option_key]) : default_value;
+    }
+
+    bool get_bool_option(const Dictionary& options, const char* key, bool default_value) {
+        const String option_key(key);
+        return options.has(option_key) ? static_cast<bool>(options[option_key]) : default_value;
     }
 
     // timing helper 只记录毫秒级耗时，既用于同步渲染，也用于后台 worker。
@@ -336,6 +507,7 @@ namespace {
         outcome.samples_per_pixel = request.settings.samples_per_pixel;
         outcome.max_depth = request.settings.max_depth;
         outcome.triangle_count = request.scene.triangle_count();
+        outcome.light_statistics = collect_light_statistics(request.scene);
         outcome.single_ray_mode = request.settings.single_ray_mode;
         outcome.total_tiles = request.settings.single_ray_mode ? 1 : total_tile_count(request.settings.image_size);
         outcome.timing_entries = request.timing_entries;
@@ -383,6 +555,30 @@ namespace {
         file->store_line(String("samples_per_pixel: ") + String::num_int64(request.settings.samples_per_pixel));
         file->store_line(String("max_depth: ") + String::num_int64(request.settings.max_depth));
         file->store_line(String("triangle_count: ") + String::num_int64(outcome.triangle_count));
+        file->store_line(String("light_count: ") + String::num_int64(outcome.light_statistics.light_count));
+        file->store_line(
+            String("light_summary: directional=") +
+            String::num_int64(outcome.light_statistics.directional_light_count) +
+            String(" omni=") + String::num_int64(outcome.light_statistics.omni_light_count) +
+            String(" spot=") + String::num_int64(outcome.light_statistics.spot_light_count) +
+            String(" shadow=") + String::num_int64(outcome.light_statistics.shadow_light_count)
+        );
+        // 明细行只记录提取后的光源快照，不重新访问 Godot 节点，保证异步日志和返回值一致。
+        for (const LightRecord& light : outcome.light_statistics.lights) {
+            file->store_line(
+                String("light[") + String::num_int64(light.index) + "]: " +
+                String("type=") + light.type +
+                String(" color=") + format_color(light.color) +
+                String(" energy=") + String::num(light.energy, 3) +
+                String(" range=") + String::num(light.range, 3) +
+                String(" attenuation=") + String::num(light.attenuation, 3) +
+                String(" spot_angle_degrees=") + String::num(light.spot_angle_degrees, 3) +
+                String(" spot_attenuation=") + String::num(light.spot_attenuation, 3) +
+                String(" casts_shadow=") + format_bool(light.casts_shadow) +
+                String(" position=") + format_vector3(light.position) +
+                String(" direction=") + format_vector3(light.direction)
+            );
+        }
         file->store_line(String("single_ray_mode: ") + String(request.settings.single_ray_mode ? "true" : "false"));
         file->store_line(String("tiles: ") + String::num_int64(outcome.tiles_done) + "/" +
                          String::num_int64(outcome.total_tiles));
@@ -426,7 +622,7 @@ namespace {
             add_timing(&timing_entries, "validate_inputs", elapsed_ms(validate_start));
             if (out_error_result != nullptr) {
                 *out_error_result = make_result(false, save_path, "No edited scene root.", image_size, normalized_spp,
-                                                timing_log_path, 0.0, single_ray_mode, 0, 0.0);
+                                                timing_log_path, 0.0, single_ray_mode, 0, LightStatistics(), 0.0);
             }
             return false;
         }
@@ -434,7 +630,8 @@ namespace {
             add_timing(&timing_entries, "validate_inputs", elapsed_ms(validate_start));
             if (out_error_result != nullptr) {
                 *out_error_result = make_result(false, save_path, "No editor viewport camera.", image_size,
-                                                normalized_spp, timing_log_path, 0.0, single_ray_mode, 0, 0.0);
+                                                normalized_spp, timing_log_path, 0.0, single_ray_mode, 0,
+                                                LightStatistics(), 0.0);
             }
             return false;
         }
@@ -442,7 +639,8 @@ namespace {
             add_timing(&timing_entries, "validate_inputs", elapsed_ms(validate_start));
             if (out_error_result != nullptr) {
                 *out_error_result = make_result(false, save_path, "Only perspective editor cameras are supported.",
-                                                image_size, normalized_spp, timing_log_path, 0.0, single_ray_mode, 0, 0.0);
+                                                image_size, normalized_spp, timing_log_path, 0.0, single_ray_mode, 0,
+                                                LightStatistics(), 0.0);
             }
             return false;
         }
@@ -450,7 +648,8 @@ namespace {
             add_timing(&timing_entries, "validate_inputs", elapsed_ms(validate_start));
             if (out_error_result != nullptr) {
                 *out_error_result = make_result(false, save_path, "Invalid viewport image size.",
-                                                image_size, normalized_spp, timing_log_path, 0.0, single_ray_mode, 0, 0.0);
+                                                image_size, normalized_spp, timing_log_path, 0.0, single_ray_mode, 0,
+                                                LightStatistics(), 0.0);
             }
             return false;
         }
@@ -462,7 +661,7 @@ namespace {
             add_timing(&timing_entries, "ensure_output_dir", elapsed_ms(output_dir_start));
             if (out_error_result != nullptr) {
                 *out_error_result = make_result(false, save_path, error, image_size, normalized_spp, timing_log_path,
-                                                0.0, single_ray_mode, 0, 0.0);
+                                                0.0, single_ray_mode, 0, LightStatistics(), 0.0);
             }
             return false;
         }
@@ -664,7 +863,7 @@ namespace {
         return make_job_result(job->id, true, done, cancelled, clamp_progress(progress), outcome.ok,
                                outcome.path, outcome.error, outcome.image_size, outcome.samples_per_pixel,
                                outcome.timing_log_path, outcome.total_ms, outcome.single_ray_mode,
-                               outcome.triangle_count, outcome.intersection_ms);
+                               outcome.triangle_count, outcome.light_statistics, outcome.intersection_ms);
     }
 
     // 调用方已经持有 g_jobs_mutex 时使用这个 helper。
@@ -694,6 +893,11 @@ void RayTraceExporter::_bind_methods() {
     );
     ClassDB::bind_static_method(
         "RayTraceExporter",
+        D_METHOD("render_scene_to_png_with_options", "root", "camera", "image_size", "options"),
+        &RayTraceExporter::render_scene_to_png_with_options
+    );
+    ClassDB::bind_static_method(
+        "RayTraceExporter",
         D_METHOD("start_render_scene_to_png", "root", "camera", "image_size", "output_path",
                  "samples_per_pixel", "max_depth", "seed", "single_ray_mode"),
         &RayTraceExporter::start_render_scene_to_png,
@@ -702,6 +906,11 @@ void RayTraceExporter::_bind_methods() {
         DEFVAL(2),
         DEFVAL(1),
         DEFVAL(false)
+    );
+    ClassDB::bind_static_method(
+        "RayTraceExporter",
+        D_METHOD("start_render_scene_to_png_with_options", "root", "camera", "image_size", "options"),
+        &RayTraceExporter::start_render_scene_to_png_with_options
     );
     ClassDB::bind_static_method(
         "RayTraceExporter",
@@ -741,7 +950,25 @@ Dictionary RayTraceExporter::render_scene_to_png(Node* root,
     const RenderOutcome outcome = execute_render_request(request, "sync", nullptr, nullptr);
     return make_result(outcome.ok, outcome.path, outcome.error, outcome.image_size, outcome.samples_per_pixel,
                        outcome.timing_log_path, outcome.total_ms, outcome.single_ray_mode,
-                       outcome.triangle_count, outcome.intersection_ms);
+                       outcome.triangle_count, outcome.light_statistics, outcome.intersection_ms);
+}
+
+// GDScript 的 ClassDB.class_call_static 最多只能传 5 个方法参数。
+// options 包装入口把导出参数收进 Dictionary，避免脚本侧因为参数数量超过上限而无法调用。
+Dictionary RayTraceExporter::render_scene_to_png_with_options(Node* root,
+                                                              Camera3D* camera,
+                                                              Vector2i image_size,
+                                                              const Dictionary& options) {
+    return render_scene_to_png(
+        root,
+        camera,
+        image_size,
+        get_string_option(options, "output_path", String()),
+        get_int_option(options, "samples_per_pixel", 1),
+        get_int_option(options, "max_depth", 2),
+        get_int64_option(options, "seed", 1),
+        get_bool_option(options, "single_ray_mode", false)
+    );
 }
 
 // 启动后台渲染任务并立即返回 job_id。
@@ -793,7 +1020,25 @@ Dictionary RayTraceExporter::start_render_scene_to_png(Node* root,
 
     return make_job_result(job->id, true, false, false, 0.0, true, request.save_path, String(),
                            request.settings.image_size, request.settings.samples_per_pixel, request.timing_log_path,
-                           0.0, request.settings.single_ray_mode, request.scene.triangle_count(), 0.0);
+                           0.0, request.settings.single_ray_mode, request.scene.triangle_count(),
+                           job->outcome.light_statistics, 0.0);
+}
+
+// 供编辑器插件使用的低参数包装入口；实际渲染流程仍委托给原有 start_render_scene_to_png。
+Dictionary RayTraceExporter::start_render_scene_to_png_with_options(Node* root,
+                                                                    Camera3D* camera,
+                                                                    Vector2i image_size,
+                                                                    const Dictionary& options) {
+    return start_render_scene_to_png(
+        root,
+        camera,
+        image_size,
+        get_string_option(options, "output_path", String()),
+        get_int_option(options, "samples_per_pixel", 1),
+        get_int_option(options, "max_depth", 2),
+        get_int64_option(options, "seed", 1),
+        get_bool_option(options, "single_ray_mode", false)
+    );
 }
 
 // 查询后台任务状态。
@@ -854,6 +1099,7 @@ Dictionary RayTraceExporter::release_render_job(int64_t job_id) {
     result["total_ms"] = job->outcome.total_ms;
     result["single_ray_mode"] = job->outcome.single_ray_mode;
     result["triangle_count"] = job->outcome.triangle_count;
+    add_light_statistics_to_result(result, job->outcome.light_statistics);
     result["intersection_ms"] = job->outcome.intersection_ms;
     return result;
 }
