@@ -1,0 +1,21 @@
+[gd_scene load_steps=6 format=3 uid="uid://bniemdy52u6ml"]
+
+[ext_resource type="ArrayMesh" uid="uid://c73f711xme115" path="res://cornell-box.obj" id="1_67q31"]
+[ext_resource type="Material" uid="uid://ca44cl7a6gqr5" path="res://Materials/DarkGreen.tres" id="2_d6jae"]
+[ext_resource type="Material" uid="uid://ujpc03bs85lh" path="res://Materials/LightMat.tres" id="2_nmal7"]
+[ext_resource type="Material" uid="uid://dw4gab4i5m0na" path="res://Materials/Khaki.tres" id="3_odqg0"]
+[ext_resource type="Material" uid="uid://ucpjgmyng6pt" path="res://Materials/BloodyRed.tres" id="4_3l1sg"]
+
+[node name="CornellBox" type="Node3D"]
+
+[node name="Cornell-box" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.253338, 0, 1.70959)
+mesh = ExtResource("1_67q31")
+surface_material_override/0 = ExtResource("2_nmal7")
+surface_material_override/1 = ExtResource("3_odqg0")
+surface_material_override/2 = ExtResource("3_odqg0")
+surface_material_override/3 = ExtResource("3_odqg0")
+surface_material_override/4 = ExtResource("4_3l1sg")
+surface_material_override/5 = ExtResource("2_d6jae")
+surface_material_override/6 = ExtResource("3_odqg0")
+surface_material_override/7 = ExtResource("3_odqg0")

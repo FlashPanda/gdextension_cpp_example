@@ -13,6 +13,8 @@ namespace godot {
 
 namespace godot_rt {
 
+    struct SceneExtractionCache;
+
     struct ExtractedScene {
         Scene scene;
         bool has_camera = false;
@@ -31,8 +33,10 @@ namespace godot_rt {
             Camera camera;
         };
 
-        void extract_node(godot::Node* node, Scene& scene, CameraSearch* camera_search) const;
-        void extract_mesh_instance(godot::MeshInstance3D* mesh_instance, Scene& scene) const;
+        void extract_node(godot::Node* node, Scene& scene, CameraSearch* camera_search,
+                          SceneExtractionCache& cache) const;
+        void extract_mesh_instance(godot::MeshInstance3D* mesh_instance, Scene& scene,
+                                   SceneExtractionCache& cache) const;
         void extract_light(godot::Light3D* godot_light, Scene& scene) const;
         void extract_camera(godot::Camera3D* godot_camera, CameraSearch& camera_search) const;
     };

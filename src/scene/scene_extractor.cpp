@@ -4,12 +4,14 @@
 #include <godot_cpp/classes/base_material3d.hpp>
 #include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/directional_light3d.hpp>
+#include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/light3d.hpp>
 #include <godot_cpp/classes/material.hpp>
 #include <godot_cpp/classes/mesh.hpp>
 #include <godot_cpp/classes/mesh_instance3d.hpp>
 #include <godot_cpp/classes/omni_light3d.hpp>
 #include <godot_cpp/classes/spot_light3d.hpp>
+#include <godot_cpp/classes/texture2d.hpp>
 #include <godot_cpp/core/math.hpp>
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/array.hpp>
@@ -21,11 +23,110 @@
 #include <godot_cpp/variant/variant.hpp>
 
 #include <algorithm>
+#include <cstddef>
+#include <memory>
+#include <unordered_map>
 
 namespace godot_rt {
+
+struct SceneExtractionCache {
+    std::unordered_map<const godot::Material*, int> material_ids;
+    std::unordered_map<const godot::Texture2D*, MaterialTexture> texture_snapshots;
+    int default_material_id = -1;
+};
+
 namespace {
 
-    Material extract_material(const godot::Ref<godot::Material>& godot_material) {
+    MaterialTextureChannel convert_texture_channel(godot::BaseMaterial3D::TextureChannel channel) {
+        switch (channel) {
+            case godot::BaseMaterial3D::TEXTURE_CHANNEL_RED:
+                return MaterialTextureChannel::Red;
+            case godot::BaseMaterial3D::TEXTURE_CHANNEL_GREEN:
+                return MaterialTextureChannel::Green;
+            case godot::BaseMaterial3D::TEXTURE_CHANNEL_BLUE:
+                return MaterialTextureChannel::Blue;
+            case godot::BaseMaterial3D::TEXTURE_CHANNEL_ALPHA:
+                return MaterialTextureChannel::Alpha;
+            case godot::BaseMaterial3D::TEXTURE_CHANNEL_GRAYSCALE:
+                return MaterialTextureChannel::Grayscale;
+        }
+
+        return MaterialTextureChannel::Red;
+    }
+
+    MaterialTexture snapshot_texture(const godot::Ref<godot::Texture2D>& texture) {
+        MaterialTexture snapshot;
+        if (texture.is_null()) {
+            return snapshot;
+        }
+
+        godot::Ref<godot::Image> image = texture->get_image();
+        if (image.is_null()) {
+            return snapshot;
+        }
+        if (image->is_compressed()) {
+            image->decompress();
+            if (image->is_compressed()) {
+                return snapshot;
+            }
+        }
+
+        const int width = image->get_width();
+        const int height = image->get_height();
+        if (width <= 0 || height <= 0) {
+            return snapshot;
+        }
+
+        auto pixels = std::make_shared<std::vector<godot::Color>>(
+            static_cast<std::size_t>(width * height)
+        );
+
+        // 异步渲染只读取这份像素快照，避免 worker 线程继续访问 Godot 资源对象。
+        for (int y = 0; y < height; ++y) {
+            for (int x = 0; x < width; ++x) {
+                (*pixels)[static_cast<std::size_t>(y * width + x)] = image->get_pixel(x, y);
+            }
+        }
+
+        snapshot.width = width;
+        snapshot.height = height;
+        snapshot.pixels = pixels;
+        return snapshot;
+    }
+
+    MaterialTexture snapshot_texture_cached(const godot::Ref<godot::Texture2D>& texture,
+                                            SceneExtractionCache& cache) {
+        if (texture.is_null()) {
+            return MaterialTexture();
+        }
+
+        const godot::Texture2D* texture_key = texture.ptr();
+        if (texture_key == nullptr) {
+            return MaterialTexture();
+        }
+
+        const auto found = cache.texture_snapshots.find(texture_key);
+        if (found != cache.texture_snapshots.end()) {
+            return found->second;
+        }
+
+        MaterialTexture snapshot = snapshot_texture(texture);
+        const auto inserted = cache.texture_snapshots.emplace(texture_key, snapshot);
+        return inserted.first->second;
+    }
+
+    MaterialTexture snapshot_material_texture(const godot::BaseMaterial3D* material,
+                                              godot::BaseMaterial3D::TextureParam texture_param,
+                                              SceneExtractionCache& cache) {
+        if (material == nullptr) {
+            return MaterialTexture();
+        }
+
+        return snapshot_texture_cached(material->get_texture(texture_param), cache);
+    }
+
+    Material extract_material(const godot::Ref<godot::Material>& godot_material,
+                              SceneExtractionCache& cache) {
         Material material;
 
         if (godot_material.is_null()) {
@@ -38,16 +139,55 @@ namespace {
         }
 
         material.albedo = base_material->get_albedo();
+        material.metallic = base_material->get_metallic();
         material.roughness = base_material->get_roughness();
+        material.specular = base_material->get_specular();
+        if (base_material->get_specular_mode() == godot::BaseMaterial3D::SPECULAR_DISABLED) {
+            material.specular = 0.0f;
+        }
+
+        material.albedo_texture = snapshot_material_texture(base_material, godot::BaseMaterial3D::TEXTURE_ALBEDO, cache);
+        material.metallic_texture = snapshot_material_texture(base_material, godot::BaseMaterial3D::TEXTURE_METALLIC, cache);
+        material.roughness_texture = snapshot_material_texture(base_material, godot::BaseMaterial3D::TEXTURE_ROUGHNESS, cache);
+        material.orm_texture = snapshot_material_texture(base_material, godot::BaseMaterial3D::TEXTURE_ORM, cache);
+        material.metallic_texture_channel = convert_texture_channel(base_material->get_metallic_texture_channel());
+        material.roughness_texture_channel = convert_texture_channel(base_material->get_roughness_texture_channel());
 
         if (base_material->get_feature(godot::BaseMaterial3D::FEATURE_EMISSION)) {
             material.emission = base_material->get_emission() * base_material->get_emission_energy_multiplier();
-            if (material.emission.get_luminance() > 0.0f) {
-                material.type = MaterialType::Emissive;
-            }
+            material.emission_texture = snapshot_material_texture(base_material, godot::BaseMaterial3D::TEXTURE_EMISSION, cache);
         }
 
         return material;
+    }
+
+    int get_or_add_material_id(Scene& scene,
+                               const godot::Ref<godot::Material>& godot_material,
+                               SceneExtractionCache& cache) {
+        if (godot_material.is_null()) {
+            if (cache.default_material_id < 0) {
+                cache.default_material_id = scene.add_material(Material());
+            }
+            return cache.default_material_id;
+        }
+
+        const godot::Material* material_key = godot_material.ptr();
+        if (material_key == nullptr) {
+            if (cache.default_material_id < 0) {
+                cache.default_material_id = scene.add_material(Material());
+            }
+            return cache.default_material_id;
+        }
+
+        const auto found = cache.material_ids.find(material_key);
+        if (found != cache.material_ids.end()) {
+            return found->second;
+        }
+
+        const Material material = extract_material(godot_material, cache);
+        const int material_id = scene.add_material(material);
+        cache.material_ids.emplace(material_key, material_id);
+        return material_id;
     }
 
     bool is_triangle_surface(const godot::Ref<godot::Mesh>& mesh, int32_t surface_index) {
@@ -154,28 +294,33 @@ namespace {
 
 Scene SceneExtractor::extract(godot::Node* root) const {
     Scene scene;
-    extract_node(root, scene, nullptr);
+    SceneExtractionCache cache;
+    extract_node(root, scene, nullptr, cache);
     return scene;
 }
 
 ExtractedScene SceneExtractor::extract_with_camera(godot::Node* root) const {
     ExtractedScene extracted_scene;
     CameraSearch camera_search;
-    extract_node(root, extracted_scene.scene, &camera_search);
+    SceneExtractionCache cache;
+    extract_node(root, extracted_scene.scene, &camera_search, cache);
 
     extracted_scene.has_camera = camera_search.has_camera;
     extracted_scene.camera = camera_search.camera;
     return extracted_scene;
 }
 
-void SceneExtractor::extract_node(godot::Node* node, Scene& scene, CameraSearch* camera_search) const {
+void SceneExtractor::extract_node(godot::Node* node,
+                                  Scene& scene,
+                                  CameraSearch* camera_search,
+                                  SceneExtractionCache& cache) const {
     if (node == nullptr) {
         return;
     }
 
     godot::MeshInstance3D* mesh_instance = godot::Object::cast_to<godot::MeshInstance3D>(node);
     if (mesh_instance != nullptr) {
-        extract_mesh_instance(mesh_instance, scene);
+        extract_mesh_instance(mesh_instance, scene, cache);
     }
 
     godot::Light3D* godot_light = godot::Object::cast_to<godot::Light3D>(node);
@@ -192,7 +337,7 @@ void SceneExtractor::extract_node(godot::Node* node, Scene& scene, CameraSearch*
 
     const int32_t child_count = node->get_child_count();
     for (int32_t i = 0; i < child_count; ++i) {
-        extract_node(node->get_child(i), scene, camera_search);
+        extract_node(node->get_child(i), scene, camera_search, cache);
     }
 }
 
@@ -225,7 +370,9 @@ void SceneExtractor::extract_light(godot::Light3D* godot_light, Scene& scene) co
     scene.add_light(light);
 }
 
-void SceneExtractor::extract_mesh_instance(godot::MeshInstance3D* mesh_instance, Scene& scene) const {
+void SceneExtractor::extract_mesh_instance(godot::MeshInstance3D* mesh_instance,
+                                           Scene& scene,
+                                           SceneExtractionCache& cache) const {
     godot::Ref<godot::Mesh> mesh = mesh_instance->get_mesh();
     if (mesh.is_null()) {
         return;
@@ -278,7 +425,7 @@ void SceneExtractor::extract_mesh_instance(godot::MeshInstance3D* mesh_instance,
         if (godot_material.is_null()) {
             godot_material = mesh->surface_get_material(surface_index);
         }
-        const int material_id = scene.add_material(extract_material(godot_material));
+        const int material_id = get_or_add_material_id(scene, godot_material, cache);
 
         if (indices.size() > 0) {
             for (int64_t i = 0; i + 2 < indices.size(); i += 3) {

@@ -6,11 +6,11 @@
 #include <vector>
 
 #include "../accel/accel_interface.h"
+#include "bsdf/GodotStandardBrdf.h"
 
 namespace godot_rt {
 namespace {
 
-    constexpr float PI = 3.14159265358979323846f;
     constexpr float RAY_EPSILON = 0.0001f;
     using TimingClock = std::chrono::steady_clock;
 
@@ -27,10 +27,6 @@ namespace {
         return materials[material_id];
     }
 
-    float max_rgb(const godot::Color& color) {
-        return std::max(color.r, std::max(color.g, color.b));
-    }
-
     void add_emission(godot::Color& radiance, const godot::Color& throughput, const godot::Color& emission) {
         radiance.r += throughput.r * emission.r;
         radiance.g += throughput.g * emission.g;
@@ -38,55 +34,22 @@ namespace {
         radiance.a = 1.0f;
     }
 
-    void multiply_throughput(godot::Color& throughput, const godot::Color& albedo) {
-        throughput.r *= albedo.r;
-        throughput.g *= albedo.g;
-        throughput.b *= albedo.b;
+    void multiply_throughput(godot::Color& throughput, const godot::Color& f, float scale) {
+        throughput.r *= f.r * scale;
+        throughput.g *= f.g * scale;
+        throughput.b *= f.b * scale;
         throughput.a = 1.0f;
     }
 
     void add_direct_lighting(godot::Color& radiance,
                              const godot::Color& throughput,
-                             const godot::Color& albedo,
+                             const godot::Color& f,
                              const godot::Color& light_radiance,
                              real_t scale) {
-        radiance.r += throughput.r * albedo.r * light_radiance.r * scale;
-        radiance.g += throughput.g * albedo.g * light_radiance.g * scale;
-        radiance.b += throughput.b * albedo.b * light_radiance.b * scale;
+        radiance.r += throughput.r * f.r * light_radiance.r * scale;
+        radiance.g += throughput.g * f.g * light_radiance.g * scale;
+        radiance.b += throughput.b * f.b * light_radiance.b * scale;
         radiance.a = 1.0f;
-    }
-
-    godot::Vector3 sample_cosine_hemisphere(const godot::Vector3& normal, Rng& rng) {
-        const godot::Vector2 u = rng.next_2d();
-        const float r = std::sqrt(u.x);
-        const float theta = 2.0f * PI * u.y;
-        const float x = r * std::cos(theta);
-        const float y = r * std::sin(theta);
-        const float z = std::sqrt(std::max(0.0f, 1.0f - u.x));
-
-        godot::Vector3 n = normal;
-        n.normalize();
-
-        godot::Vector3 tangent;
-        if (std::abs(n.x) > std::abs(n.z)) {
-            tangent = godot::Vector3(-n.y, n.x, 0.0f);
-        } else {
-            tangent = godot::Vector3(0.0f, -n.z, n.y);
-        }
-        if (tangent.length_squared() == 0.0f) {
-            tangent = godot::Vector3(1.0f, 0.0f, 0.0f);
-        }
-        tangent.normalize();
-
-        godot::Vector3 bitangent = n.cross(tangent);
-        if (bitangent.length_squared() == 0.0f) {
-            bitangent = godot::Vector3(0.0f, 1.0f, 0.0f);
-        }
-        bitangent.normalize();
-
-        godot::Vector3 direction = tangent * x + bitangent * y + n * z;
-        direction.normalize();
-        return direction;
     }
 
     double elapsed_ms(TimingClock::time_point start) {
@@ -205,12 +168,9 @@ godot::Color RandomWalkIntegrator::trace(const RayDifferential& ray, Rng& rng) c
         }
 
         const Material& material = material_or_default(*scene, hit.materialId);
-        if (max_rgb(material.emission) > 0.0f) {
-            add_emission(radiance, throughput, material.emission);
-        }
-
-        if (material.type == MaterialType::Emissive) {
-            break;
+        const godot::Color emission = sample_material_emission(material, hit.uv);
+        if (brdf::max_rgb(emission) > 0.0f) {
+            add_emission(radiance, throughput, emission);
         }
 
         godot::Vector3 normal = hit.normal;
@@ -221,6 +181,18 @@ godot::Color RandomWalkIntegrator::trace(const RayDifferential& ray, Rng& rng) c
         if (normal.dot(current_ray.d) > 0.0f) {
             normal = -normal;
         }
+
+        godot::Vector3 wo = -current_ray.d;
+        if (wo.length_squared() == 0.0f) {
+            break;
+        }
+        wo.normalize();
+        if (normal.dot(wo) <= 0.0f) {
+            break;
+        }
+
+        const GodotStandardParams bsdf_params = make_godot_standard_params(material, hit.uv, normal);
+        const GodotStandardBRDF bsdf(bsdf_params);
 
         for (const Light& light : scene->get_lights()) {
             const LightSample light_sample = light.sample_li(hit.position);
@@ -245,16 +217,30 @@ godot::Color RandomWalkIntegrator::trace(const RayDifferential& ray, Rng& rng) c
                 }
             }
 
-            add_direct_lighting(radiance, throughput, material.albedo, light_sample.radiance, cos_theta / PI);
+            const godot::Color f = bsdf.eval(wo, light_sample.wi);
+            if (brdf::is_black(f)) {
+                continue;
+            }
+
+            add_direct_lighting(radiance, throughput, f, light_sample.radiance, cos_theta);
         }
 
-        multiply_throughput(throughput, material.albedo);
-        if (max_rgb(throughput) <= 0.0f) {
+        const BsdfSample bsdf_sample = bsdf.sample(wo, rng);
+        const float sample_cos_theta = normal.dot(bsdf_sample.wi);
+        if (bsdf_sample.pdf <= 0.0f || sample_cos_theta <= 0.0f || brdf::is_black(bsdf_sample.f)) {
             break;
         }
 
-        const godot::Vector3 bounce_direction = sample_cosine_hemisphere(normal, rng);
-        current_ray = RayDifferential(hit.position + normal * RAY_EPSILON, bounce_direction);
+        multiply_throughput(
+            throughput,
+            bsdf_sample.f,
+            static_cast<float>(sample_cos_theta) / bsdf_sample.pdf
+        );
+        if (brdf::max_rgb(throughput) <= 0.0f) {
+            break;
+        }
+
+        current_ray = RayDifferential(hit.position + normal * RAY_EPSILON, bsdf_sample.wi);
     }
 
     radiance.a = 1.0f;

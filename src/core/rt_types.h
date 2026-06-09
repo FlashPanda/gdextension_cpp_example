@@ -4,7 +4,10 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstddef>
+#include <memory>
 #include <string>
+#include <vector>
 
 #include "rt_math.h"
 #include "ray.h"
@@ -12,11 +15,29 @@
 
 namespace godot_rt
 {
-    enum class MaterialType : std::uint8_t {
-        Diffuse,
-        Mirror,
-        Dielectric,
-        Emissive
+    enum class BrdfModel : std::uint8_t {
+        GodotStandard,
+        UnrealDefaultLit,
+        DisneyPrincipled2012
+    };
+
+    enum class MaterialTextureChannel : std::uint8_t {
+        Red,
+        Green,
+        Blue,
+        Alpha,
+        Grayscale
+    };
+
+    struct MaterialTexture {
+        int width = 0;
+        int height = 0;
+        std::shared_ptr<const std::vector<godot::Color>> pixels;
+
+        bool is_valid() const {
+            return width > 0 && height > 0 && pixels != nullptr &&
+                   pixels->size() == static_cast<std::size_t>(width * height);
+        }
     };
 
     struct Hit {
@@ -57,11 +78,20 @@ namespace godot_rt
     };
 
     struct Material {
-        MaterialType type = MaterialType::Diffuse;
+        BrdfModel brdf_model = BrdfModel::GodotStandard;
         godot::Color albedo = godot::Color(1.0f, 1.0f, 1.0f, 1.0f);
         godot::Color emission = godot::Color(0.0f, 0.0f, 0.0f, 1.0f);
+        float metallic = 0.0f;
         float roughness = 0.5f;
+        float specular = 0.5f;
         float ior = 1.5f;
+        MaterialTexture albedo_texture;
+        MaterialTexture metallic_texture;
+        MaterialTexture roughness_texture;
+        MaterialTexture orm_texture;
+        MaterialTexture emission_texture;
+        MaterialTextureChannel metallic_texture_channel = MaterialTextureChannel::Blue;
+        MaterialTextureChannel roughness_texture_channel = MaterialTextureChannel::Red;
     };
 
     enum class CameraFovAxis : std::uint8_t {
