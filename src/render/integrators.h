@@ -1,6 +1,7 @@
 #ifndef GDEXTENSION_CPP_EXAMPLE_INTEGRATORS_H
 #define GDEXTENSION_CPP_EXAMPLE_INTEGRATORS_H
 
+#include <cstdint>
 #include <memory>
 
 #include <godot_cpp/core/math_defs.hpp>
@@ -19,6 +20,9 @@ namespace godot_rt {
 
     struct RenderStatistics {
         double intersection_ms = 0.0;
+        std::int64_t primary_ray_count = 0;
+        std::int64_t primary_ray_hit_count = 0;
+        std::int64_t primary_ray_miss_count = 0;
     };
 
     class Integrator {

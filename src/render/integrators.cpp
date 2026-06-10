@@ -163,7 +163,16 @@ godot::Color RandomWalkIntegrator::trace(const RayDifferential& ray, Rng& rng) c
 
     for (int depth = 0; depth < max_depth; ++depth) {
         Hit hit;
-        if (!intersect(current_ray, &hit)) {
+        const bool ray_hit = intersect(current_ray, &hit);
+        if (depth == 0 && statistics != nullptr) {
+            ++statistics->primary_ray_count;
+            if (ray_hit) {
+                ++statistics->primary_ray_hit_count;
+            } else {
+                ++statistics->primary_ray_miss_count;
+            }
+        }
+        if (!ray_hit) {
             break;
         }
 

@@ -34,9 +34,8 @@ namespace {
     // 包括渲染请求/结果的数据快照、同步与异步共用的 helper、耗时日志、
     // 以及跨 Godot 调用保存的后台渲染任务表。这里的符号不暴露给 GDExtension API。
     constexpr int TILE_SIZE = 16;
-    constexpr const char DEFAULT_OUTPUT_DIR[] = "res://raytrace_output";
+    constexpr const char DEFAULT_OUTPUT_DIR[] = "user://raytrace_output";
     constexpr const char DEFAULT_OUTPUT_PREFIX[] = "current_scene";
-    constexpr const char LEGACY_DEFAULT_OUTPUT_PATH[] = "res://raytrace_output/current_scene.png";
     using TimingClock = std::chrono::steady_clock;
 
     // 单个阶段的耗时记录。name 使用字符串常量，避免在渲染热路径中额外分配。
@@ -98,6 +97,9 @@ namespace {
         bool single_ray_mode = false;
         int tiles_done = 0;
         int total_tiles = 0;
+        int64_t primary_ray_count = 0;
+        int64_t primary_ray_hit_count = 0;
+        int64_t primary_ray_miss_count = 0;
         double intersection_ms = 0.0;
         double total_ms = 0.0;
         std::vector<TimingEntry> timing_entries;
@@ -229,6 +231,15 @@ namespace {
         result["lights"] = make_light_array(statistics);
     }
 
+    void add_primary_ray_statistics_to_result(Dictionary& result,
+                                              int64_t primary_ray_count,
+                                              int64_t primary_ray_hit_count,
+                                              int64_t primary_ray_miss_count) {
+        result["primary_ray_count"] = primary_ray_count;
+        result["primary_ray_hit_count"] = primary_ray_hit_count;
+        result["primary_ray_miss_count"] = primary_ray_miss_count;
+    }
+
     String format_bool(bool value) {
         return value ? String("true") : String("false");
     }
@@ -260,6 +271,9 @@ namespace {
                            bool single_ray_mode,
                            int32_t triangle_count,
                            const LightStatistics& light_statistics,
+                           int64_t primary_ray_count,
+                           int64_t primary_ray_hit_count,
+                           int64_t primary_ray_miss_count,
                            double intersection_ms) {
         Dictionary result;
         result["ok"] = ok;
@@ -273,6 +287,8 @@ namespace {
         result["single_ray_mode"] = single_ray_mode;
         result["triangle_count"] = triangle_count;
         add_light_statistics_to_result(result, light_statistics);
+        add_primary_ray_statistics_to_result(result, primary_ray_count, primary_ray_hit_count,
+                                             primary_ray_miss_count);
         result["intersection_ms"] = intersection_ms;
         return result;
     }
@@ -294,9 +310,13 @@ namespace {
                                bool single_ray_mode,
                                int32_t triangle_count,
                                const LightStatistics& light_statistics,
+                               int64_t primary_ray_count,
+                               int64_t primary_ray_hit_count,
+                               int64_t primary_ray_miss_count,
                                double intersection_ms) {
         Dictionary result = make_result(ok, path, error, image_size, samples_per_pixel, timing_log_path,
                                         total_ms, single_ray_mode, triangle_count, light_statistics,
+                                        primary_ray_count, primary_ray_hit_count, primary_ray_miss_count,
                                         intersection_ms);
         result["job_id"] = job_id;
         result["exists"] = exists;
@@ -310,7 +330,7 @@ namespace {
     Dictionary make_missing_job_result(int64_t job_id) {
         return make_job_result(job_id, false, true, false, 0.0, false, String(),
                                "Render job not found.", Vector2i(0, 0), 1, String(), 0.0, false, 0,
-                               LightStatistics(), 0.0);
+                               LightStatistics(), 0, 0, 0, 0.0);
     }
 
     float clamp01(float value) {
@@ -416,7 +436,7 @@ namespace {
     }
 
     String resolve_output_path(const String& output_path) {
-        if (output_path.is_empty() || output_path == String(LEGACY_DEFAULT_OUTPUT_PATH)) {
+        if (output_path.is_empty()) {
             return make_unique_default_output_path();
         }
 
@@ -519,7 +539,11 @@ namespace {
             return;
         }
 
-        outcome->intersection_ms = tracer.get_statistics().intersection_ms;
+        const godot_rt::RenderStatistics& statistics = tracer.get_statistics();
+        outcome->intersection_ms = statistics.intersection_ms;
+        outcome->primary_ray_count = statistics.primary_ray_count;
+        outcome->primary_ray_hit_count = statistics.primary_ray_hit_count;
+        outcome->primary_ray_miss_count = statistics.primary_ray_miss_count;
     }
 
     // 追加写入一次渲染的耗时日志。
@@ -555,6 +579,9 @@ namespace {
         file->store_line(String("samples_per_pixel: ") + String::num_int64(request.settings.samples_per_pixel));
         file->store_line(String("max_depth: ") + String::num_int64(request.settings.max_depth));
         file->store_line(String("triangle_count: ") + String::num_int64(outcome.triangle_count));
+        file->store_line(String("primary_ray_count: ") + String::num_int64(outcome.primary_ray_count));
+        file->store_line(String("primary_ray_hit_count: ") + String::num_int64(outcome.primary_ray_hit_count));
+        file->store_line(String("primary_ray_miss_count: ") + String::num_int64(outcome.primary_ray_miss_count));
         file->store_line(String("light_count: ") + String::num_int64(outcome.light_statistics.light_count));
         file->store_line(
             String("light_summary: directional=") +
@@ -622,7 +649,8 @@ namespace {
             add_timing(&timing_entries, "validate_inputs", elapsed_ms(validate_start));
             if (out_error_result != nullptr) {
                 *out_error_result = make_result(false, save_path, "No edited scene root.", image_size, normalized_spp,
-                                                timing_log_path, 0.0, single_ray_mode, 0, LightStatistics(), 0.0);
+                                                timing_log_path, 0.0, single_ray_mode, 0, LightStatistics(), 0, 0, 0,
+                                                0.0);
             }
             return false;
         }
@@ -631,7 +659,7 @@ namespace {
             if (out_error_result != nullptr) {
                 *out_error_result = make_result(false, save_path, "No editor viewport camera.", image_size,
                                                 normalized_spp, timing_log_path, 0.0, single_ray_mode, 0,
-                                                LightStatistics(), 0.0);
+                                                LightStatistics(), 0, 0, 0, 0.0);
             }
             return false;
         }
@@ -640,7 +668,7 @@ namespace {
             if (out_error_result != nullptr) {
                 *out_error_result = make_result(false, save_path, "Only perspective editor cameras are supported.",
                                                 image_size, normalized_spp, timing_log_path, 0.0, single_ray_mode, 0,
-                                                LightStatistics(), 0.0);
+                                                LightStatistics(), 0, 0, 0, 0.0);
             }
             return false;
         }
@@ -649,7 +677,7 @@ namespace {
             if (out_error_result != nullptr) {
                 *out_error_result = make_result(false, save_path, "Invalid viewport image size.",
                                                 image_size, normalized_spp, timing_log_path, 0.0, single_ray_mode, 0,
-                                                LightStatistics(), 0.0);
+                                                LightStatistics(), 0, 0, 0, 0.0);
             }
             return false;
         }
@@ -661,7 +689,7 @@ namespace {
             add_timing(&timing_entries, "ensure_output_dir", elapsed_ms(output_dir_start));
             if (out_error_result != nullptr) {
                 *out_error_result = make_result(false, save_path, error, image_size, normalized_spp, timing_log_path,
-                                                0.0, single_ray_mode, 0, LightStatistics(), 0.0);
+                                                0.0, single_ray_mode, 0, LightStatistics(), 0, 0, 0, 0.0);
             }
             return false;
         }
@@ -863,7 +891,9 @@ namespace {
         return make_job_result(job->id, true, done, cancelled, clamp_progress(progress), outcome.ok,
                                outcome.path, outcome.error, outcome.image_size, outcome.samples_per_pixel,
                                outcome.timing_log_path, outcome.total_ms, outcome.single_ray_mode,
-                               outcome.triangle_count, outcome.light_statistics, outcome.intersection_ms);
+                               outcome.triangle_count, outcome.light_statistics, outcome.primary_ray_count,
+                               outcome.primary_ray_hit_count, outcome.primary_ray_miss_count,
+                               outcome.intersection_ms);
     }
 
     // 调用方已经持有 g_jobs_mutex 时使用这个 helper。
@@ -950,7 +980,8 @@ Dictionary RayTraceExporter::render_scene_to_png(Node* root,
     const RenderOutcome outcome = execute_render_request(request, "sync", nullptr, nullptr);
     return make_result(outcome.ok, outcome.path, outcome.error, outcome.image_size, outcome.samples_per_pixel,
                        outcome.timing_log_path, outcome.total_ms, outcome.single_ray_mode,
-                       outcome.triangle_count, outcome.light_statistics, outcome.intersection_ms);
+                       outcome.triangle_count, outcome.light_statistics, outcome.primary_ray_count,
+                       outcome.primary_ray_hit_count, outcome.primary_ray_miss_count, outcome.intersection_ms);
 }
 
 // GDScript 的 ClassDB.class_call_static 最多只能传 5 个方法参数。
@@ -1021,7 +1052,8 @@ Dictionary RayTraceExporter::start_render_scene_to_png(Node* root,
     return make_job_result(job->id, true, false, false, 0.0, true, request.save_path, String(),
                            request.settings.image_size, request.settings.samples_per_pixel, request.timing_log_path,
                            0.0, request.settings.single_ray_mode, request.scene.triangle_count(),
-                           job->outcome.light_statistics, 0.0);
+                           job->outcome.light_statistics, job->outcome.primary_ray_count,
+                           job->outcome.primary_ray_hit_count, job->outcome.primary_ray_miss_count, 0.0);
 }
 
 // 供编辑器插件使用的低参数包装入口；实际渲染流程仍委托给原有 start_render_scene_to_png。
@@ -1100,6 +1132,9 @@ Dictionary RayTraceExporter::release_render_job(int64_t job_id) {
     result["single_ray_mode"] = job->outcome.single_ray_mode;
     result["triangle_count"] = job->outcome.triangle_count;
     add_light_statistics_to_result(result, job->outcome.light_statistics);
+    add_primary_ray_statistics_to_result(result, job->outcome.primary_ray_count,
+                                         job->outcome.primary_ray_hit_count,
+                                         job->outcome.primary_ray_miss_count);
     result["intersection_ms"] = job->outcome.intersection_ms;
     return result;
 }

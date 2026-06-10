@@ -9,7 +9,7 @@
 [node name="CornellBox" type="Node3D"]
 
 [node name="Cornell-box" type="MeshInstance3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.253338, 0, 1.70959)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.393478, 0.169304, 1.68684)
 mesh = ExtResource("1_67q31")
 surface_material_override/0 = ExtResource("2_nmal7")
 surface_material_override/1 = ExtResource("3_odqg0")
@@ -19,3 +19,6 @@ surface_material_override/4 = ExtResource("4_3l1sg")
 surface_material_override/5 = ExtResource("2_d6jae")
 surface_material_override/6 = ExtResource("3_odqg0")
 surface_material_override/7 = ExtResource("3_odqg0")
+
+[node name="OmniLight3D" type="OmniLight3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.43102, 4.03722, -2.45118)
