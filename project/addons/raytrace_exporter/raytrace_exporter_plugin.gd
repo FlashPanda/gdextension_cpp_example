@@ -260,6 +260,21 @@ func _bool_text(value: bool) -> String:
 func _print_render_statistics(triangle_count: int, intersection_ms: float, result: Dictionary) -> void:
 	print("Ray trace triangles: %d" % triangle_count)
 	print(
+		"Ray trace primary rays: total=%d hit=%d miss=%d" % [
+			int(result.get("primary_ray_count", 0)),
+			int(result.get("primary_ray_hit_count", 0)),
+			int(result.get("primary_ray_miss_count", 0)),
+		]
+	)
+
+	var primary_hit_mask_path := String(result.get("primary_hit_mask_path", ""))
+	if not primary_hit_mask_path.is_empty():
+		if bool(result.get("ok", false)):
+			print("Ray trace primary hit mask saved to %s" % primary_hit_mask_path)
+		else:
+			print("Ray trace primary hit mask path: %s" % primary_hit_mask_path)
+
+	print(
 		"Ray trace lights: %d (directional: %d, omni: %d, spot: %d, shadow: %d)" % [
 			int(result.get("light_count", 0)),
 			int(result.get("directional_light_count", 0)),

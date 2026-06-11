@@ -1,8 +1,10 @@
 #ifndef GDEXTENSION_CPP_EXAMPLE_CPU_PATH_TRACER_H
 #define GDEXTENSION_CPP_EXAMPLE_CPU_PATH_TRACER_H
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <vector>
 
 #include <godot_cpp/variant/color.hpp>
 #include <godot_cpp/variant/vector2i.hpp>
@@ -46,10 +48,16 @@ namespace godot_rt {
         const Camera& get_camera() const;
         const CpuPathTracerSettings& get_settings() const;
         const RenderStatistics& get_statistics() const;
+        int get_primary_hit_sample_count(godot::Vector2i pixel) const;
+        int get_primary_miss_sample_count(godot::Vector2i pixel) const;
 
     private:
         void rebuild_integrator();
         void render_sample(godot::Vector2i pixel, int pass_index, int sample_index);
+        TraceResult trace_sample(const RayDifferential& ray, Rng& rng) const;
+        void record_primary_hit(godot::Vector2i pixel, bool hit);
+        bool contains_pixel(godot::Vector2i pixel) const;
+        std::size_t pixel_index(godot::Vector2i pixel) const;
 
         Scene scene;
         Camera camera;
@@ -57,6 +65,8 @@ namespace godot_rt {
         RenderStatistics render_statistics;
         Film film;
         FrameAccumulator frame_accumulator;
+        std::vector<int> primary_hit_sample_count;
+        std::vector<int> primary_miss_sample_count;
         std::unique_ptr<AccelInterface> accel;
         std::unique_ptr<Integrator> integrator;
     };

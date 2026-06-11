@@ -44,6 +44,10 @@ void CpuPathTracer::reset(const Scene& new_scene, const Camera& new_camera, CpuP
 
     film.resize(settings.image_size);
     frame_accumulator.resize(settings.image_size, settings.tile_size);
+    const std::size_t pixel_count = static_cast<std::size_t>(settings.image_size.x) *
+                                    static_cast<std::size_t>(settings.image_size.y);
+    primary_hit_sample_count.assign(pixel_count, 0);
+    primary_miss_sample_count.assign(pixel_count, 0);
 
     if (accel) {
         accel->build(scene);
@@ -107,11 +111,7 @@ godot::Color CpuPathTracer::trace_path(const Ray& ray, Rng& rng) const {
 }
 
 godot::Color CpuPathTracer::trace_path(const RayDifferential& ray, Rng& rng) const {
-    if (!integrator) {
-        return black();
-    }
-
-    return integrator->trace(ray, rng);
+    return trace_sample(ray, rng).radiance;
 }
 
 Film& CpuPathTracer::get_film() {
@@ -138,8 +138,56 @@ const RenderStatistics& CpuPathTracer::get_statistics() const {
     return render_statistics;
 }
 
+int CpuPathTracer::get_primary_hit_sample_count(godot::Vector2i pixel) const {
+    if (!contains_pixel(pixel)) {
+        return 0;
+    }
+
+    return primary_hit_sample_count[pixel_index(pixel)];
+}
+
+int CpuPathTracer::get_primary_miss_sample_count(godot::Vector2i pixel) const {
+    if (!contains_pixel(pixel)) {
+        return 0;
+    }
+
+    return primary_miss_sample_count[pixel_index(pixel)];
+}
+
 void CpuPathTracer::rebuild_integrator() {
     integrator = Integrator::create("random_walk", &scene, accel.get(), settings.max_depth, &render_statistics);
+}
+
+TraceResult CpuPathTracer::trace_sample(const RayDifferential& ray, Rng& rng) const {
+    if (!integrator) {
+        TraceResult result;
+        result.radiance = black();
+        return result;
+    }
+
+    return integrator->trace(ray, rng);
+}
+
+void CpuPathTracer::record_primary_hit(godot::Vector2i pixel, bool hit) {
+    if (!contains_pixel(pixel)) {
+        return;
+    }
+
+    const std::size_t index = pixel_index(pixel);
+    if (hit) {
+        ++primary_hit_sample_count[index];
+    } else {
+        ++primary_miss_sample_count[index];
+    }
+}
+
+bool CpuPathTracer::contains_pixel(godot::Vector2i pixel) const {
+    return pixel.x >= 0 && pixel.y >= 0 && pixel.x < settings.image_size.x && pixel.y < settings.image_size.y;
+}
+
+std::size_t CpuPathTracer::pixel_index(godot::Vector2i pixel) const {
+    return static_cast<std::size_t>(pixel.y) * static_cast<std::size_t>(settings.image_size.x) +
+           static_cast<std::size_t>(pixel.x);
 }
 
 void CpuPathTracer::render_sample(godot::Vector2i pixel, int pass_index, int sample_index) {
@@ -151,7 +199,11 @@ void CpuPathTracer::render_sample(godot::Vector2i pixel, int pass_index, int sam
     );
 
     const RayDifferential ray = camera.generate_primary_ray_differential(pixel_sample, settings.image_size);
-    film.add_sample(pixel, trace_path(ray, rng));
+    const TraceResult result = trace_sample(ray, rng);
+    if (result.primary_ray_tested) {
+        record_primary_hit(pixel, result.primary_ray_hit);
+    }
+    film.add_sample(pixel, result.radiance);
 }
 
 }

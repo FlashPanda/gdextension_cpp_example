@@ -152,9 +152,10 @@ godot::String RandomWalkIntegrator::to_string() const {
     return "RandomWalkIntegrator";
 }
 
-godot::Color RandomWalkIntegrator::trace(const RayDifferential& ray, Rng& rng) const {
+TraceResult RandomWalkIntegrator::trace(const RayDifferential& ray, Rng& rng) const {
+    TraceResult result;
     if (scene == nullptr || aggregate == nullptr) {
-        return black();
+        return result;
     }
 
     godot::Color radiance = black();
@@ -164,6 +165,10 @@ godot::Color RandomWalkIntegrator::trace(const RayDifferential& ray, Rng& rng) c
     for (int depth = 0; depth < max_depth; ++depth) {
         Hit hit;
         const bool ray_hit = intersect(current_ray, &hit);
+        if (depth == 0) {
+            result.primary_ray_tested = true;
+            result.primary_ray_hit = ray_hit;
+        }
         if (depth == 0 && statistics != nullptr) {
             ++statistics->primary_ray_count;
             if (ray_hit) {
@@ -253,7 +258,8 @@ godot::Color RandomWalkIntegrator::trace(const RayDifferential& ray, Rng& rng) c
     }
 
     radiance.a = 1.0f;
-    return radiance;
+    result.radiance = radiance;
+    return result;
 }
 
 }

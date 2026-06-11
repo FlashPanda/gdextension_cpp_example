@@ -25,6 +25,12 @@ namespace godot_rt {
         std::int64_t primary_ray_miss_count = 0;
     };
 
+    struct TraceResult {
+        godot::Color radiance = godot::Color(0.0f, 0.0f, 0.0f, 1.0f);
+        bool primary_ray_tested = false;
+        bool primary_ray_hit = false;
+    };
+
     class Integrator {
     public:
         virtual ~Integrator();
@@ -38,7 +44,7 @@ namespace godot_rt {
         );
 
         virtual godot::String to_string() const = 0;
-        virtual godot::Color trace(const RayDifferential& ray, Rng& rng) const = 0;
+        virtual TraceResult trace(const RayDifferential& ray, Rng& rng) const = 0;
 
         bool intersect(const Ray& ray, Hit* hit, real_t t_max = Math_INF) const;
         bool intersect_p(const Ray& ray, real_t t_max = Math_INF) const;
@@ -74,7 +80,7 @@ namespace godot_rt {
         );
 
         godot::String to_string() const final;
-        godot::Color trace(const RayDifferential& ray, Rng& rng) const final;
+        TraceResult trace(const RayDifferential& ray, Rng& rng) const final;
     };
 
 }

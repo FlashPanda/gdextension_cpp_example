@@ -75,6 +75,7 @@ namespace {
         godot_rt::Camera camera;
         godot_rt::CpuPathTracerSettings settings;
         String save_path;
+        String primary_hit_mask_path;
         String timing_log_path;
         TimingClock::time_point total_start;
         std::vector<TimingEntry> timing_entries;
@@ -87,6 +88,7 @@ namespace {
         bool ok = false;
         bool cancelled = false;
         String path;
+        String primary_hit_mask_path;
         String timing_log_path;
         String error;
         Vector2i image_size = Vector2i(0, 0);
@@ -263,6 +265,7 @@ namespace {
     // 字段名保持稳定，调用方可以用 ok/error 判断失败，用 path/timing_log_path 找到产物。
     Dictionary make_result(bool ok,
                            const String& path,
+                           const String& primary_hit_mask_path,
                            const String& error,
                            const Vector2i& image_size,
                            int32_t samples_per_pixel,
@@ -278,6 +281,7 @@ namespace {
         Dictionary result;
         result["ok"] = ok;
         result["path"] = path;
+        result["primary_hit_mask_path"] = primary_hit_mask_path;
         result["timing_log_path"] = timing_log_path;
         result["error"] = error;
         result["width"] = image_size.x;
@@ -302,6 +306,7 @@ namespace {
                                double progress,
                                bool ok,
                                const String& path,
+                               const String& primary_hit_mask_path,
                                const String& error,
                                const Vector2i& image_size,
                                int32_t samples_per_pixel,
@@ -314,10 +319,10 @@ namespace {
                                int64_t primary_ray_hit_count,
                                int64_t primary_ray_miss_count,
                                double intersection_ms) {
-        Dictionary result = make_result(ok, path, error, image_size, samples_per_pixel, timing_log_path,
-                                        total_ms, single_ray_mode, triangle_count, light_statistics,
-                                        primary_ray_count, primary_ray_hit_count, primary_ray_miss_count,
-                                        intersection_ms);
+        Dictionary result = make_result(ok, path, primary_hit_mask_path, error, image_size, samples_per_pixel,
+                                        timing_log_path, total_ms, single_ray_mode, triangle_count,
+                                        light_statistics, primary_ray_count, primary_ray_hit_count,
+                                        primary_ray_miss_count, intersection_ms);
         result["job_id"] = job_id;
         result["exists"] = exists;
         result["done"] = done;
@@ -328,7 +333,7 @@ namespace {
 
     // 所有找不到 job 的路径都返回同一种状况，减少脚本侧分支处理。
     Dictionary make_missing_job_result(int64_t job_id) {
-        return make_job_result(job_id, false, true, false, 0.0, false, String(),
+        return make_job_result(job_id, false, true, false, 0.0, false, String(), String(),
                                "Render job not found.", Vector2i(0, 0), 1, String(), 0.0, false, 0,
                                LightStatistics(), 0, 0, 0, 0.0);
     }
@@ -453,6 +458,15 @@ namespace {
         return basename + String(".timings.log");
     }
 
+    String make_primary_hit_mask_path(const String& output_path) {
+        const String basename = output_path.get_basename();
+        if (basename.is_empty()) {
+            return output_path + String("_primary_hit_mask.png");
+        }
+
+        return basename + String("_primary_hit_mask.png");
+    }
+
     // timing log 中使用稳定的短状态名，避免把 Godot Dictionary 的字段格式耦合到日志文本。
     const char* status_name(const RenderOutcome& outcome) {
         if (outcome.ok) {
@@ -517,11 +531,45 @@ namespace {
         return image;
     }
 
+    Ref<Image> primary_hit_mask_to_image(const godot_rt::CpuPathTracer& tracer, const Vector2i& image_size) {
+        Ref<Image> image = Image::create_empty(image_size.x, image_size.y, false, Image::FORMAT_RGBA8);
+        if (image.is_null()) {
+            return image;
+        }
+
+        const Color hit_color(0.0f, 1.0f, 0.0f, 1.0f);
+        const Color miss_color(1.0f, 0.0f, 1.0f, 1.0f);
+        const Color mixed_color(1.0f, 1.0f, 0.0f, 1.0f);
+        const Color no_sample_color(0.0f, 0.4f, 1.0f, 1.0f);
+
+        for (int y = 0; y < image_size.y; ++y) {
+            for (int x = 0; x < image_size.x; ++x) {
+                const Vector2i pixel(x, y);
+                const int hit_count = tracer.get_primary_hit_sample_count(pixel);
+                const int miss_count = tracer.get_primary_miss_sample_count(pixel);
+
+                Color mask_color = no_sample_color;
+                if (hit_count > 0 && miss_count > 0) {
+                    mask_color = mixed_color;
+                } else if (hit_count > 0) {
+                    mask_color = hit_color;
+                } else if (miss_count > 0) {
+                    mask_color = miss_color;
+                }
+
+                image->set_pixel(x, y, mask_color);
+            }
+        }
+
+        return image;
+    }
+
     // 初始 outcome 用于异步任务刚创建、尚未完成时的轮询结果。
     // 它复制请求中的静态信息，让 UI 能在 worker 产出最终结果前显示尺寸、路径和总 tile 数。
     RenderOutcome make_initial_outcome(const RenderRequest& request) {
         RenderOutcome outcome;
         outcome.path = request.save_path;
+        outcome.primary_hit_mask_path = request.primary_hit_mask_path;
         outcome.timing_log_path = request.timing_log_path;
         outcome.image_size = request.settings.image_size;
         outcome.samples_per_pixel = request.settings.samples_per_pixel;
@@ -573,6 +621,7 @@ namespace {
         file->store_line(String("status: ") + String(status_name(outcome)));
         file->store_line(String("mode: ") + String(mode));
         file->store_line(String("output: ") + request.save_path);
+        file->store_line(String("primary_hit_mask_path: ") + outcome.primary_hit_mask_path);
         file->store_line(String("timing_log: ") + request.timing_log_path);
         file->store_line(String("image_size: ") + String::num_int64(request.settings.image_size.x) + "x" +
                          String::num_int64(request.settings.image_size.y));
@@ -643,22 +692,24 @@ namespace {
         const auto validate_start = TimingClock::now();
         const int32_t normalized_spp = std::max(samples_per_pixel, 1);
         const String save_path = resolve_output_path(output_path);
+        const String primary_hit_mask_path = make_primary_hit_mask_path(save_path);
         const String timing_log_path = make_timing_log_path(save_path);
 
         if (root == nullptr) {
             add_timing(&timing_entries, "validate_inputs", elapsed_ms(validate_start));
             if (out_error_result != nullptr) {
-                *out_error_result = make_result(false, save_path, "No edited scene root.", image_size, normalized_spp,
-                                                timing_log_path, 0.0, single_ray_mode, 0, LightStatistics(), 0, 0, 0,
-                                                0.0);
+                *out_error_result = make_result(false, save_path, primary_hit_mask_path, "No edited scene root.",
+                                                image_size, normalized_spp, timing_log_path, 0.0, single_ray_mode, 0,
+                                                LightStatistics(), 0, 0, 0, 0.0);
             }
             return false;
         }
         if (camera == nullptr) {
             add_timing(&timing_entries, "validate_inputs", elapsed_ms(validate_start));
             if (out_error_result != nullptr) {
-                *out_error_result = make_result(false, save_path, "No editor viewport camera.", image_size,
-                                                normalized_spp, timing_log_path, 0.0, single_ray_mode, 0,
+                *out_error_result = make_result(false, save_path, primary_hit_mask_path,
+                                                "No editor viewport camera.", image_size, normalized_spp,
+                                                timing_log_path, 0.0, single_ray_mode, 0,
                                                 LightStatistics(), 0, 0, 0, 0.0);
             }
             return false;
@@ -666,8 +717,9 @@ namespace {
         if (camera->get_projection() != Camera3D::PROJECTION_PERSPECTIVE) {
             add_timing(&timing_entries, "validate_inputs", elapsed_ms(validate_start));
             if (out_error_result != nullptr) {
-                *out_error_result = make_result(false, save_path, "Only perspective editor cameras are supported.",
-                                                image_size, normalized_spp, timing_log_path, 0.0, single_ray_mode, 0,
+                *out_error_result = make_result(false, save_path, primary_hit_mask_path,
+                                                "Only perspective editor cameras are supported.", image_size,
+                                                normalized_spp, timing_log_path, 0.0, single_ray_mode, 0,
                                                 LightStatistics(), 0, 0, 0, 0.0);
             }
             return false;
@@ -675,9 +727,10 @@ namespace {
         if (image_size.x <= 0 || image_size.y <= 0) {
             add_timing(&timing_entries, "validate_inputs", elapsed_ms(validate_start));
             if (out_error_result != nullptr) {
-                *out_error_result = make_result(false, save_path, "Invalid viewport image size.",
-                                                image_size, normalized_spp, timing_log_path, 0.0, single_ray_mode, 0,
-                                                LightStatistics(), 0, 0, 0, 0.0);
+                *out_error_result = make_result(false, save_path, primary_hit_mask_path,
+                                                "Invalid viewport image size.", image_size, normalized_spp,
+                                                timing_log_path, 0.0, single_ray_mode, 0, LightStatistics(), 0, 0, 0,
+                                                0.0);
             }
             return false;
         }
@@ -688,8 +741,9 @@ namespace {
         if (!ensure_output_dir(save_path, &error)) {
             add_timing(&timing_entries, "ensure_output_dir", elapsed_ms(output_dir_start));
             if (out_error_result != nullptr) {
-                *out_error_result = make_result(false, save_path, error, image_size, normalized_spp, timing_log_path,
-                                                0.0, single_ray_mode, 0, LightStatistics(), 0, 0, 0, 0.0);
+                *out_error_result = make_result(false, save_path, primary_hit_mask_path, error, image_size,
+                                                normalized_spp, timing_log_path, 0.0, single_ray_mode, 0,
+                                                LightStatistics(), 0, 0, 0, 0.0);
             }
             return false;
         }
@@ -704,6 +758,7 @@ namespace {
         const auto prepare_settings_start = TimingClock::now();
         request.camera = make_render_camera(camera);
         request.save_path = save_path;
+        request.primary_hit_mask_path = primary_hit_mask_path;
         request.timing_log_path = timing_log_path;
         request.total_start = total_start;
         request.settings.image_size = image_size;
@@ -849,6 +904,30 @@ namespace {
             return outcome;
         }
 
+        const auto primary_hit_mask_to_image_start = TimingClock::now();
+        Ref<Image> primary_hit_mask = primary_hit_mask_to_image(tracer, request.settings.image_size);
+        add_timing(&timing_entries, "primary_hit_mask_to_image", elapsed_ms(primary_hit_mask_to_image_start));
+        if (primary_hit_mask.is_null()) {
+            outcome.error = "Could not create primary hit mask image.";
+            outcome.tiles_done = effective_tiles_done->load(std::memory_order_relaxed);
+            outcome.timing_entries = timing_entries;
+            outcome.total_ms = elapsed_ms(request.total_start);
+            write_timing_log(request, outcome, mode);
+            return outcome;
+        }
+
+        const auto save_primary_hit_mask_png_start = TimingClock::now();
+        const Error save_primary_hit_mask_error = primary_hit_mask->save_png(request.primary_hit_mask_path);
+        add_timing(&timing_entries, "save_primary_hit_mask_png", elapsed_ms(save_primary_hit_mask_png_start));
+        if (save_primary_hit_mask_error != OK) {
+            outcome.error = "Could not save primary hit mask PNG.";
+            outcome.tiles_done = effective_tiles_done->load(std::memory_order_relaxed);
+            outcome.timing_entries = timing_entries;
+            outcome.total_ms = elapsed_ms(request.total_start);
+            write_timing_log(request, outcome, mode);
+            return outcome;
+        }
+
         outcome.ok = true;
         outcome.tiles_done = effective_tiles_done->load(std::memory_order_relaxed);
         outcome.timing_entries = timing_entries;
@@ -889,10 +968,10 @@ namespace {
         }
 
         return make_job_result(job->id, true, done, cancelled, clamp_progress(progress), outcome.ok,
-                               outcome.path, outcome.error, outcome.image_size, outcome.samples_per_pixel,
-                               outcome.timing_log_path, outcome.total_ms, outcome.single_ray_mode,
-                               outcome.triangle_count, outcome.light_statistics, outcome.primary_ray_count,
-                               outcome.primary_ray_hit_count, outcome.primary_ray_miss_count,
+                               outcome.path, outcome.primary_hit_mask_path, outcome.error, outcome.image_size,
+                               outcome.samples_per_pixel, outcome.timing_log_path, outcome.total_ms,
+                               outcome.single_ray_mode, outcome.triangle_count, outcome.light_statistics,
+                               outcome.primary_ray_count, outcome.primary_ray_hit_count, outcome.primary_ray_miss_count,
                                outcome.intersection_ms);
     }
 
@@ -978,10 +1057,11 @@ Dictionary RayTraceExporter::render_scene_to_png(Node* root,
     }
 
     const RenderOutcome outcome = execute_render_request(request, "sync", nullptr, nullptr);
-    return make_result(outcome.ok, outcome.path, outcome.error, outcome.image_size, outcome.samples_per_pixel,
-                       outcome.timing_log_path, outcome.total_ms, outcome.single_ray_mode,
-                       outcome.triangle_count, outcome.light_statistics, outcome.primary_ray_count,
-                       outcome.primary_ray_hit_count, outcome.primary_ray_miss_count, outcome.intersection_ms);
+    return make_result(outcome.ok, outcome.path, outcome.primary_hit_mask_path, outcome.error, outcome.image_size,
+                       outcome.samples_per_pixel, outcome.timing_log_path, outcome.total_ms,
+                       outcome.single_ray_mode, outcome.triangle_count, outcome.light_statistics,
+                       outcome.primary_ray_count, outcome.primary_ray_hit_count, outcome.primary_ray_miss_count,
+                       outcome.intersection_ms);
 }
 
 // GDScript 的 ClassDB.class_call_static 最多只能传 5 个方法参数。
@@ -1049,9 +1129,10 @@ Dictionary RayTraceExporter::start_render_scene_to_png(Node* root,
     job->outcome = make_initial_outcome(job->request);
     job->worker_can_start.store(true, std::memory_order_release);
 
-    return make_job_result(job->id, true, false, false, 0.0, true, request.save_path, String(),
-                           request.settings.image_size, request.settings.samples_per_pixel, request.timing_log_path,
-                           0.0, request.settings.single_ray_mode, request.scene.triangle_count(),
+    return make_job_result(job->id, true, false, false, 0.0, true, request.save_path,
+                           request.primary_hit_mask_path, String(), request.settings.image_size,
+                           request.settings.samples_per_pixel, request.timing_log_path, 0.0,
+                           request.settings.single_ray_mode, request.scene.triangle_count(),
                            job->outcome.light_statistics, job->outcome.primary_ray_count,
                            job->outcome.primary_ray_hit_count, job->outcome.primary_ray_miss_count, 0.0);
 }
@@ -1127,6 +1208,7 @@ Dictionary RayTraceExporter::release_render_job(int64_t job_id) {
     result["ok"] = true;
     result["released"] = true;
     result["job_id"] = job_id;
+    result["primary_hit_mask_path"] = job->outcome.primary_hit_mask_path;
     result["timing_log_path"] = job->outcome.timing_log_path;
     result["total_ms"] = job->outcome.total_ms;
     result["single_ray_mode"] = job->outcome.single_ray_mode;
