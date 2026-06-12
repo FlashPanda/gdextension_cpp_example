@@ -25,7 +25,6 @@ namespace godot_rt {
         int samples_per_pixel = 1;
         int max_depth = 4;
         std::uint64_t seed = 1;
-        bool single_ray_mode = false;
     };
 
     class CpuPathTracer {
@@ -37,7 +36,7 @@ namespace godot_rt {
 
         bool render_next_tile(Tile* out_tile = nullptr);
         void render_tile(const Tile& tile);
-        bool render_single_ray(const Tile& tile);
+        bool render_pixel(godot::Vector2i pixel, int pass_index = 0, int sample_index = 0);
         godot::Color trace_path(const Ray& ray, Rng& rng) const;
         godot::Color trace_path(const RayDifferential& ray, Rng& rng) const;
 

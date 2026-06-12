@@ -25,8 +25,7 @@ namespace godot {
             const String& output_path,
             int32_t samples_per_pixel,
             int32_t max_depth,
-            int64_t seed,
-            bool single_ray_mode = false
+            int64_t seed
         );
         static Dictionary render_scene_to_png_with_options(
             Node* root,
@@ -41,8 +40,7 @@ namespace godot {
             const String& output_path,
             int32_t samples_per_pixel,
             int32_t max_depth,
-            int64_t seed,
-            bool single_ray_mode = false
+            int64_t seed
         );
         static Dictionary start_render_scene_to_png_with_options(
             Node* root,

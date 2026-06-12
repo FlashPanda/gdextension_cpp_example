@@ -92,17 +92,12 @@ void CpuPathTracer::render_tile(const Tile& tile) {
     }
 }
 
-bool CpuPathTracer::render_single_ray(const Tile& tile) {
-    const int x_begin = std::max(tile.origin.x, 0);
-    const int y_begin = std::max(tile.origin.y, 0);
-    const int x_end = std::min(tile.origin.x + tile.size.x, settings.image_size.x);
-    const int y_end = std::min(tile.origin.y + tile.size.y, settings.image_size.y);
-
-    if (x_begin >= x_end || y_begin >= y_end) {
+bool CpuPathTracer::render_pixel(godot::Vector2i pixel, int pass_index, int sample_index) {
+    if (!contains_pixel(pixel)) {
         return false;
     }
 
-    render_sample(godot::Vector2i(x_begin, y_begin), tile.pass_index, 0);
+    render_sample(pixel, std::max(pass_index, 0), std::max(sample_index, 0));
     return true;
 }
 

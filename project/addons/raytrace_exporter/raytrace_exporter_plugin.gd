@@ -6,18 +6,33 @@ const SAMPLES_PER_PIXEL := 1
 const MAX_DEPTH := 4
 const SEED := 1
 const NO_JOB_ID := 0
+const TILE_SIZE := 16
+const MODE_FULL := 0
+const MODE_PIXEL := 1
+const MODE_TILE := 2
 
 var _button: Button
-var _single_ray_check_box: CheckBox
+var _render_mode_option: OptionButton
+var _target_x_spin_box: SpinBox
+var _target_y_spin_box: SpinBox
 var _active_job_id := NO_JOB_ID
 var _cancel_requested := false
 
 
 func _enter_tree() -> void:
-	_single_ray_check_box = CheckBox.new()
-	_single_ray_check_box.text = "Single Ray"
-	_single_ray_check_box.tooltip_text = "Render only the first sampled ray, save the PNG, and report timing."
-	add_control_to_container(EditorPlugin.CONTAINER_SPATIAL_EDITOR_MENU, _single_ray_check_box)
+	_render_mode_option = OptionButton.new()
+	_render_mode_option.add_item("Full", MODE_FULL)
+	_render_mode_option.add_item("Pixel", MODE_PIXEL)
+	_render_mode_option.add_item("Tile", MODE_TILE)
+	_render_mode_option.tooltip_text = "Render the full image, one selected pixel ray, or one selected 16x16 tile."
+	_render_mode_option.item_selected.connect(_on_render_mode_selected)
+	add_control_to_container(EditorPlugin.CONTAINER_SPATIAL_EDITOR_MENU, _render_mode_option)
+
+	_target_x_spin_box = _create_target_spin_box("X ")
+	_target_y_spin_box = _create_target_spin_box("Y ")
+	add_control_to_container(EditorPlugin.CONTAINER_SPATIAL_EDITOR_MENU, _target_x_spin_box)
+	add_control_to_container(EditorPlugin.CONTAINER_SPATIAL_EDITOR_MENU, _target_y_spin_box)
+	_update_target_controls()
 
 	_button = Button.new()
 	_button.text = "Trace PNG"
@@ -25,6 +40,73 @@ func _enter_tree() -> void:
 	_button.pressed.connect(_on_trace_pressed)
 	add_control_to_container(EditorPlugin.CONTAINER_SPATIAL_EDITOR_MENU, _button)
 	set_process(true)
+
+
+func _create_target_spin_box(prefix: String) -> SpinBox:
+	var spin_box := SpinBox.new()
+	spin_box.min_value = 0
+	spin_box.max_value = 0
+	spin_box.step = 1
+	spin_box.allow_greater = false
+	spin_box.allow_lesser = false
+	spin_box.custom_minimum_size.x = 78
+	spin_box.set_prefix(prefix)
+	return spin_box
+
+
+func _on_render_mode_selected(_index: int) -> void:
+	_update_target_controls()
+	var viewport := get_editor_interface().get_editor_viewport_3d(0)
+	if viewport == null:
+		return
+
+	var viewport_size := viewport.get_visible_rect().size
+	var image_size := Vector2i(int(viewport_size.x), int(viewport_size.y))
+	if image_size.x > 0 and image_size.y > 0:
+		_configure_target_range(image_size, _current_render_mode())
+
+
+func _current_render_mode() -> int:
+	if _render_mode_option == null:
+		return MODE_FULL
+	return _render_mode_option.get_selected_id()
+
+
+func _render_mode_name(mode: int) -> String:
+	match mode:
+		MODE_PIXEL:
+			return "pixel"
+		MODE_TILE:
+			return "tile"
+		_:
+			return "full"
+
+
+func _update_target_controls() -> void:
+	var mode := _current_render_mode()
+	var show_target := mode != MODE_FULL
+	var editable := show_target and _active_job_id == NO_JOB_ID
+
+	if _target_x_spin_box != null:
+		_target_x_spin_box.visible = show_target
+		_target_x_spin_box.editable = editable
+		_target_x_spin_box.tooltip_text = "Pixel X coordinate." if mode == MODE_PIXEL else "16x16 tile X index."
+	if _target_y_spin_box != null:
+		_target_y_spin_box.visible = show_target
+		_target_y_spin_box.editable = editable
+		_target_y_spin_box.tooltip_text = "Pixel Y coordinate." if mode == MODE_PIXEL else "16x16 tile Y index."
+
+
+func _configure_target_range(image_size: Vector2i, mode: int) -> void:
+	if _target_x_spin_box == null or _target_y_spin_box == null:
+		return
+
+	if mode == MODE_TILE:
+		_target_x_spin_box.max_value = max(ceili(float(image_size.x) / float(TILE_SIZE)) - 1, 0)
+		_target_y_spin_box.max_value = max(ceili(float(image_size.y) / float(TILE_SIZE)) - 1, 0)
+	else:
+		_target_x_spin_box.max_value = max(image_size.x - 1, 0)
+		_target_y_spin_box.max_value = max(image_size.y - 1, 0)
 
 
 func _exit_tree() -> void:
@@ -39,10 +121,20 @@ func _exit_tree() -> void:
 		_button.queue_free()
 		_button = null
 
-	if _single_ray_check_box != null:
-		remove_control_from_container(EditorPlugin.CONTAINER_SPATIAL_EDITOR_MENU, _single_ray_check_box)
-		_single_ray_check_box.queue_free()
-		_single_ray_check_box = null
+	if _target_y_spin_box != null:
+		remove_control_from_container(EditorPlugin.CONTAINER_SPATIAL_EDITOR_MENU, _target_y_spin_box)
+		_target_y_spin_box.queue_free()
+		_target_y_spin_box = null
+
+	if _target_x_spin_box != null:
+		remove_control_from_container(EditorPlugin.CONTAINER_SPATIAL_EDITOR_MENU, _target_x_spin_box)
+		_target_x_spin_box.queue_free()
+		_target_x_spin_box = null
+
+	if _render_mode_option != null:
+		remove_control_from_container(EditorPlugin.CONTAINER_SPATIAL_EDITOR_MENU, _render_mode_option)
+		_render_mode_option.queue_free()
+		_render_mode_option = null
 
 
 func _process(_delta: float) -> void:
@@ -76,7 +168,7 @@ func _process(_delta: float) -> void:
 	var path := String(result.get("path", OUTPUT_PATH))
 	var timing_log_path := String(result.get("timing_log_path", ""))
 	var total_ms := float(result.get("total_ms", 0.0))
-	var single_ray_mode := bool(result.get("single_ray_mode", false))
+	var render_mode := String(result.get("render_mode", "full"))
 	var triangle_count := int(result.get("triangle_count", 0))
 	var intersection_ms := float(result.get("intersection_ms", 0.0))
 	var error := String(result.get("error", "unknown error"))
@@ -91,20 +183,20 @@ func _process(_delta: float) -> void:
 	if was_cancelled:
 		print("Ray trace PNG export cancelled.")
 		_print_timing_log_path(timing_log_path)
-		_print_elapsed_time(total_ms, single_ray_mode)
+		_print_elapsed_time(total_ms, render_mode)
 		_print_render_statistics(triangle_count, intersection_ms, result)
 		return
 
 	if not ok:
 		push_error("Ray trace export failed: %s" % error)
 		_print_timing_log_path(timing_log_path)
-		_print_elapsed_time(total_ms, single_ray_mode)
+		_print_elapsed_time(total_ms, render_mode)
 		_print_render_statistics(triangle_count, intersection_ms, result)
 		return
 
 	print("Ray trace PNG saved to %s" % path)
 	_print_timing_log_path(timing_log_path)
-	_print_elapsed_time(total_ms, single_ray_mode)
+	_print_elapsed_time(total_ms, render_mode)
 	_print_render_statistics(triangle_count, intersection_ms, result)
 
 
@@ -143,13 +235,20 @@ func _start_render_job() -> void:
 		push_error("Ray trace export failed: RayTraceExporter GDExtension is not loaded.")
 		return
 
-	var single_ray_mode := _single_ray_check_box != null and _single_ray_check_box.button_pressed
+	var render_mode_id := _current_render_mode()
+	_configure_target_range(image_size, render_mode_id)
+	var target := Vector2i(
+		int(_target_x_spin_box.value) if _target_x_spin_box != null else 0,
+		int(_target_y_spin_box.value) if _target_y_spin_box != null else 0
+	)
 	var render_options := {
 		"output_path": OUTPUT_PATH,
 		"samples_per_pixel": SAMPLES_PER_PIXEL,
 		"max_depth": MAX_DEPTH,
 		"seed": SEED,
-		"single_ray_mode": single_ray_mode
+		"render_mode": _render_mode_name(render_mode_id),
+		"target_pixel": target,
+		"target_tile": target,
 	}
 
 	if not ClassDB.class_has_method(&"RayTraceExporter", &"start_render_scene_to_png_with_options"):
@@ -179,7 +278,10 @@ func _start_render_job() -> void:
 	if not result.get("ok", false):
 		push_error("Ray trace export failed: %s" % result.get("error", "unknown error"))
 		_print_timing_log_path(String(result.get("timing_log_path", "")))
-		_print_elapsed_time(float(result.get("total_ms", 0.0)), bool(result.get("single_ray_mode", single_ray_mode)))
+		_print_elapsed_time(
+			float(result.get("total_ms", 0.0)),
+			String(result.get("render_mode", _render_mode_name(render_mode_id)))
+		)
 		_print_render_statistics(
 			int(result.get("triangle_count", 0)),
 			float(result.get("intersection_ms", 0.0)),
@@ -225,8 +327,9 @@ func _reset_job_state() -> void:
 	if _button != null:
 		_button.disabled = false
 		_button.text = "Trace PNG"
-	if _single_ray_check_box != null:
-		_single_ray_check_box.disabled = false
+	if _render_mode_option != null:
+		_render_mode_option.disabled = false
+	_update_target_controls()
 
 
 func _update_button_progress(progress: float) -> void:
@@ -235,8 +338,12 @@ func _update_button_progress(progress: float) -> void:
 
 	var percent := int(round(clamp(progress, 0.0, 1.0) * 100.0))
 	_button.disabled = false
-	if _single_ray_check_box != null:
-		_single_ray_check_box.disabled = true
+	if _render_mode_option != null:
+		_render_mode_option.disabled = true
+	if _target_x_spin_box != null:
+		_target_x_spin_box.editable = false
+	if _target_y_spin_box != null:
+		_target_y_spin_box.editable = false
 	if _cancel_requested:
 		_button.text = "Cancelling %d%%" % percent
 	else:
@@ -248,9 +355,8 @@ func _print_timing_log_path(timing_log_path: String) -> void:
 		print("Ray trace timing log saved to %s" % timing_log_path)
 
 
-func _print_elapsed_time(total_ms: float, single_ray_mode: bool) -> void:
-	var mode := "single ray" if single_ray_mode else "full trace"
-	print("Ray trace elapsed time (%s): %.3f ms" % [mode, total_ms])
+func _print_elapsed_time(total_ms: float, render_mode: String) -> void:
+	print("Ray trace elapsed time (%s): %.3f ms" % [render_mode, total_ms])
 
 
 func _bool_text(value: bool) -> String:

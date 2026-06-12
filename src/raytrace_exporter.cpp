@@ -38,6 +38,18 @@ namespace {
     constexpr const char DEFAULT_OUTPUT_PREFIX[] = "current_scene";
     using TimingClock = std::chrono::steady_clock;
 
+    enum class RenderMode {
+        Full,
+        Pixel,
+        Tile,
+    };
+
+    struct RenderSelection {
+        RenderMode mode = RenderMode::Full;
+        Vector2i target_pixel = Vector2i(0, 0);
+        Vector2i target_tile = Vector2i(0, 0);
+    };
+
     // 单个阶段的耗时记录。name 使用字符串常量，避免在渲染热路径中额外分配。
     struct TimingEntry {
         const char* name = "";
@@ -74,6 +86,7 @@ namespace {
         godot_rt::Scene scene;
         godot_rt::Camera camera;
         godot_rt::CpuPathTracerSettings settings;
+        RenderSelection selection;
         String save_path;
         String primary_hit_mask_path;
         String timing_log_path;
@@ -96,7 +109,7 @@ namespace {
         int32_t max_depth = 0;
         int32_t triangle_count = 0;
         LightStatistics light_statistics;
-        bool single_ray_mode = false;
+        RenderSelection selection;
         int tiles_done = 0;
         int total_tiles = 0;
         int64_t primary_ray_count = 0;
@@ -261,6 +274,18 @@ namespace {
                String::num(value.a, 3) + ")";
     }
 
+    const char* render_mode_name(RenderMode mode) {
+        switch (mode) {
+            case RenderMode::Pixel:
+                return "pixel";
+            case RenderMode::Tile:
+                return "tile";
+            case RenderMode::Full:
+            default:
+                return "full";
+        }
+    }
+
     // 统一生成返回给 GDScript/编辑器侧的基础结果字典。
     // 字段名保持稳定，调用方可以用 ok/error 判断失败，用 path/timing_log_path 找到产物。
     Dictionary make_result(bool ok,
@@ -271,7 +296,7 @@ namespace {
                            int32_t samples_per_pixel,
                            const String& timing_log_path,
                            double total_ms,
-                           bool single_ray_mode,
+                           const RenderSelection& selection,
                            int32_t triangle_count,
                            const LightStatistics& light_statistics,
                            int64_t primary_ray_count,
@@ -288,7 +313,9 @@ namespace {
         result["height"] = image_size.y;
         result["samples_per_pixel"] = samples_per_pixel;
         result["total_ms"] = total_ms;
-        result["single_ray_mode"] = single_ray_mode;
+        result["render_mode"] = String(render_mode_name(selection.mode));
+        result["target_pixel"] = selection.target_pixel;
+        result["target_tile"] = selection.target_tile;
         result["triangle_count"] = triangle_count;
         add_light_statistics_to_result(result, light_statistics);
         add_primary_ray_statistics_to_result(result, primary_ray_count, primary_ray_hit_count,
@@ -312,7 +339,7 @@ namespace {
                                int32_t samples_per_pixel,
                                const String& timing_log_path,
                                double total_ms,
-                               bool single_ray_mode,
+                               const RenderSelection& selection,
                                int32_t triangle_count,
                                const LightStatistics& light_statistics,
                                int64_t primary_ray_count,
@@ -320,7 +347,7 @@ namespace {
                                int64_t primary_ray_miss_count,
                                double intersection_ms) {
         Dictionary result = make_result(ok, path, primary_hit_mask_path, error, image_size, samples_per_pixel,
-                                        timing_log_path, total_ms, single_ray_mode, triangle_count,
+                                        timing_log_path, total_ms, selection, triangle_count,
                                         light_statistics, primary_ray_count, primary_ray_hit_count,
                                         primary_ray_miss_count, intersection_ms);
         result["job_id"] = job_id;
@@ -334,7 +361,7 @@ namespace {
     // 所有找不到 job 的路径都返回同一种状况，减少脚本侧分支处理。
     Dictionary make_missing_job_result(int64_t job_id) {
         return make_job_result(job_id, false, true, false, 0.0, false, String(), String(),
-                               "Render job not found.", Vector2i(0, 0), 1, String(), 0.0, false, 0,
+                               "Render job not found.", Vector2i(0, 0), 1, String(), 0.0, RenderSelection(), 0,
                                LightStatistics(), 0, 0, 0, 0.0);
     }
 
@@ -370,9 +397,31 @@ namespace {
         return options.has(option_key) ? static_cast<int64_t>(options[option_key]) : default_value;
     }
 
-    bool get_bool_option(const Dictionary& options, const char* key, bool default_value) {
+    Vector2i get_vector2i_option(const Dictionary& options, const char* key, const Vector2i& default_value) {
         const String option_key(key);
-        return options.has(option_key) ? static_cast<bool>(options[option_key]) : default_value;
+        return options.has(option_key) ? static_cast<Vector2i>(options[option_key]) : default_value;
+    }
+
+    bool parse_render_selection(const Dictionary& options, RenderSelection* out_selection, String* out_error) {
+        RenderSelection selection;
+        const String mode = get_string_option(options, "render_mode", "full").to_lower();
+        if (mode == "pixel") {
+            selection.mode = RenderMode::Pixel;
+        } else if (mode == "tile") {
+            selection.mode = RenderMode::Tile;
+        } else if (mode != "full") {
+            if (out_error != nullptr) {
+                *out_error = "Invalid render_mode. Expected \"full\", \"pixel\", or \"tile\".";
+            }
+            return false;
+        }
+
+        selection.target_pixel = get_vector2i_option(options, "target_pixel", Vector2i(0, 0));
+        selection.target_tile = get_vector2i_option(options, "target_tile", Vector2i(0, 0));
+        if (out_selection != nullptr) {
+            *out_selection = selection;
+        }
+        return true;
     }
 
     // timing helper 只记录毫秒级耗时，既用于同步渲染，也用于后台 worker。
@@ -576,8 +625,10 @@ namespace {
         outcome.max_depth = request.settings.max_depth;
         outcome.triangle_count = request.scene.triangle_count();
         outcome.light_statistics = collect_light_statistics(request.scene);
-        outcome.single_ray_mode = request.settings.single_ray_mode;
-        outcome.total_tiles = request.settings.single_ray_mode ? 1 : total_tile_count(request.settings.image_size);
+        outcome.selection = request.selection;
+        outcome.total_tiles = request.selection.mode == RenderMode::Full
+                                  ? total_tile_count(request.settings.image_size)
+                                  : 1;
         outcome.timing_entries = request.timing_entries;
         return outcome;
     }
@@ -655,7 +706,16 @@ namespace {
                 String(" direction=") + format_vector3(light.direction)
             );
         }
-        file->store_line(String("single_ray_mode: ") + String(request.settings.single_ray_mode ? "true" : "false"));
+        file->store_line(String("render_mode: ") + render_mode_name(request.selection.mode));
+        if (request.selection.mode == RenderMode::Pixel) {
+            file->store_line(String("target_pixel: ") +
+                             String::num_int64(request.selection.target_pixel.x) + "," +
+                             String::num_int64(request.selection.target_pixel.y));
+        } else if (request.selection.mode == RenderMode::Tile) {
+            file->store_line(String("target_tile: ") +
+                             String::num_int64(request.selection.target_tile.x) + "," +
+                             String::num_int64(request.selection.target_tile.y));
+        }
         file->store_line(String("tiles: ") + String::num_int64(outcome.tiles_done) + "/" +
                          String::num_int64(outcome.total_tiles));
         if (!outcome.error.is_empty()) {
@@ -684,7 +744,7 @@ namespace {
                                 int32_t samples_per_pixel,
                                 int32_t max_depth,
                                 int64_t seed,
-                                bool single_ray_mode,
+                                const RenderSelection& selection,
                                 TimingClock::time_point total_start,
                                 RenderRequest* out_request,
                                 Dictionary* out_error_result) {
@@ -699,7 +759,7 @@ namespace {
             add_timing(&timing_entries, "validate_inputs", elapsed_ms(validate_start));
             if (out_error_result != nullptr) {
                 *out_error_result = make_result(false, save_path, primary_hit_mask_path, "No edited scene root.",
-                                                image_size, normalized_spp, timing_log_path, 0.0, single_ray_mode, 0,
+                                                image_size, normalized_spp, timing_log_path, 0.0, selection, 0,
                                                 LightStatistics(), 0, 0, 0, 0.0);
             }
             return false;
@@ -709,7 +769,7 @@ namespace {
             if (out_error_result != nullptr) {
                 *out_error_result = make_result(false, save_path, primary_hit_mask_path,
                                                 "No editor viewport camera.", image_size, normalized_spp,
-                                                timing_log_path, 0.0, single_ray_mode, 0,
+                                                timing_log_path, 0.0, selection, 0,
                                                 LightStatistics(), 0, 0, 0, 0.0);
             }
             return false;
@@ -719,7 +779,7 @@ namespace {
             if (out_error_result != nullptr) {
                 *out_error_result = make_result(false, save_path, primary_hit_mask_path,
                                                 "Only perspective editor cameras are supported.", image_size,
-                                                normalized_spp, timing_log_path, 0.0, single_ray_mode, 0,
+                                                normalized_spp, timing_log_path, 0.0, selection, 0,
                                                 LightStatistics(), 0, 0, 0, 0.0);
             }
             return false;
@@ -729,8 +789,36 @@ namespace {
             if (out_error_result != nullptr) {
                 *out_error_result = make_result(false, save_path, primary_hit_mask_path,
                                                 "Invalid viewport image size.", image_size, normalized_spp,
-                                                timing_log_path, 0.0, single_ray_mode, 0, LightStatistics(), 0, 0, 0,
+                                                timing_log_path, 0.0, selection, 0, LightStatistics(), 0, 0, 0,
                                                 0.0);
+            }
+            return false;
+        }
+        if (selection.mode == RenderMode::Pixel &&
+            (selection.target_pixel.x < 0 || selection.target_pixel.y < 0 ||
+             selection.target_pixel.x >= image_size.x || selection.target_pixel.y >= image_size.y)) {
+            add_timing(&timing_entries, "validate_inputs", elapsed_ms(validate_start));
+            if (out_error_result != nullptr) {
+                *out_error_result = make_result(false, save_path, primary_hit_mask_path,
+                                                "Target pixel is outside the viewport image.", image_size,
+                                                normalized_spp, timing_log_path, 0.0, selection, 0,
+                                                LightStatistics(), 0, 0, 0, 0.0);
+            }
+            return false;
+        }
+        const Vector2i tile_count(
+            ceil_div(image_size.x, TILE_SIZE),
+            ceil_div(image_size.y, TILE_SIZE)
+        );
+        if (selection.mode == RenderMode::Tile &&
+            (selection.target_tile.x < 0 || selection.target_tile.y < 0 ||
+             selection.target_tile.x >= tile_count.x || selection.target_tile.y >= tile_count.y)) {
+            add_timing(&timing_entries, "validate_inputs", elapsed_ms(validate_start));
+            if (out_error_result != nullptr) {
+                *out_error_result = make_result(false, save_path, primary_hit_mask_path,
+                                                "Target tile is outside the viewport tile grid.", image_size,
+                                                normalized_spp, timing_log_path, 0.0, selection, 0,
+                                                LightStatistics(), 0, 0, 0, 0.0);
             }
             return false;
         }
@@ -742,7 +830,7 @@ namespace {
             add_timing(&timing_entries, "ensure_output_dir", elapsed_ms(output_dir_start));
             if (out_error_result != nullptr) {
                 *out_error_result = make_result(false, save_path, primary_hit_mask_path, error, image_size,
-                                                normalized_spp, timing_log_path, 0.0, single_ray_mode, 0,
+                                                normalized_spp, timing_log_path, 0.0, selection, 0,
                                                 LightStatistics(), 0, 0, 0, 0.0);
             }
             return false;
@@ -757,16 +845,16 @@ namespace {
 
         const auto prepare_settings_start = TimingClock::now();
         request.camera = make_render_camera(camera);
+        request.selection = selection;
         request.save_path = save_path;
         request.primary_hit_mask_path = primary_hit_mask_path;
         request.timing_log_path = timing_log_path;
         request.total_start = total_start;
         request.settings.image_size = image_size;
         request.settings.tile_size = Vector2i(TILE_SIZE, TILE_SIZE);
-        request.settings.samples_per_pixel = normalized_spp;
+        request.settings.samples_per_pixel = selection.mode == RenderMode::Pixel ? 1 : normalized_spp;
         request.settings.max_depth = std::max(max_depth, 0);
         request.settings.seed = static_cast<std::uint64_t>(std::max<int64_t>(seed, 0));
-        request.settings.single_ray_mode = single_ray_mode;
         add_timing(&timing_entries, "prepare_camera_settings", elapsed_ms(prepare_settings_start));
         request.timing_entries = timing_entries;
 
@@ -806,26 +894,42 @@ namespace {
         return true;
     }
 
-    bool render_single_ray(godot_rt::CpuPathTracer& tracer,
-                           const Vector2i& image_size,
-                           const std::atomic_bool* cancel_requested,
-                           std::atomic_int* tiles_done) {
+    bool render_selected_pixel(godot_rt::CpuPathTracer& tracer,
+                               const Vector2i& target_pixel,
+                               const std::atomic_bool* cancel_requested,
+                               std::atomic_int* tiles_done) {
+        if (cancel_requested != nullptr && cancel_requested->load(std::memory_order_relaxed)) {
+            return false;
+        }
+
+        if (tracer.render_pixel(target_pixel) && tiles_done != nullptr) {
+            tiles_done->fetch_add(1, std::memory_order_relaxed);
+        }
+
+        return true;
+    }
+
+    bool render_selected_tile(godot_rt::CpuPathTracer& tracer,
+                              const Vector2i& image_size,
+                              const Vector2i& target_tile,
+                              const std::atomic_bool* cancel_requested,
+                              std::atomic_int* tiles_done) {
         if (cancel_requested != nullptr && cancel_requested->load(std::memory_order_relaxed)) {
             return false;
         }
 
         godot_rt::Tile tile;
-        tile.origin = Vector2i(0, 0);
+        tile.origin = Vector2i(target_tile.x * TILE_SIZE, target_tile.y * TILE_SIZE);
         tile.size = Vector2i(
-            std::min(TILE_SIZE, image_size.x),
-            std::min(TILE_SIZE, image_size.y)
+            std::min(TILE_SIZE, image_size.x - tile.origin.x),
+            std::min(TILE_SIZE, image_size.y - tile.origin.y)
         );
         tile.pass_index = 0;
+        tracer.render_tile(tile);
 
-        if (tracer.render_single_ray(tile) && tiles_done != nullptr) {
+        if (tiles_done != nullptr) {
             tiles_done->fetch_add(1, std::memory_order_relaxed);
         }
-
         return true;
     }
 
@@ -850,14 +954,41 @@ namespace {
         add_timing(&timing_entries, "build_accel", elapsed_ms(build_accel_start));
 
         const auto render_start = TimingClock::now();
-        const bool render_completed = request.settings.single_ray_mode
-                                      ? render_single_ray(tracer, request.settings.image_size, cancel_requested,
-                                                          effective_tiles_done)
-                                      : render_one_pass(tracer, request.settings.image_size, cancel_requested,
-                                                        effective_tiles_done);
+        bool render_completed = false;
+        const char* render_timing_name = "render_tiles";
+        switch (request.selection.mode) {
+            case RenderMode::Pixel:
+                render_timing_name = "render_pixel";
+                render_completed = render_selected_pixel(
+                    tracer,
+                    request.selection.target_pixel,
+                    cancel_requested,
+                    effective_tiles_done
+                );
+                break;
+            case RenderMode::Tile:
+                render_timing_name = "render_selected_tile";
+                render_completed = render_selected_tile(
+                    tracer,
+                    request.settings.image_size,
+                    request.selection.target_tile,
+                    cancel_requested,
+                    effective_tiles_done
+                );
+                break;
+            case RenderMode::Full:
+            default:
+                render_completed = render_one_pass(
+                    tracer,
+                    request.settings.image_size,
+                    cancel_requested,
+                    effective_tiles_done
+                );
+                break;
+        }
         add_timing(
             &timing_entries,
-            request.settings.single_ray_mode ? "render_single_ray" : "render_tiles",
+            render_timing_name,
             elapsed_ms(render_start)
         );
         copy_render_statistics(tracer, &outcome);
@@ -970,9 +1101,111 @@ namespace {
         return make_job_result(job->id, true, done, cancelled, clamp_progress(progress), outcome.ok,
                                outcome.path, outcome.primary_hit_mask_path, outcome.error, outcome.image_size,
                                outcome.samples_per_pixel, outcome.timing_log_path, outcome.total_ms,
-                               outcome.single_ray_mode, outcome.triangle_count, outcome.light_statistics,
+                               outcome.selection, outcome.triangle_count, outcome.light_statistics,
                                outcome.primary_ray_count, outcome.primary_ray_hit_count, outcome.primary_ray_miss_count,
                                outcome.intersection_ms);
+    }
+
+    Dictionary make_selection_error_result(const Dictionary& options,
+                                           const Vector2i& image_size,
+                                           const RenderSelection& selection,
+                                           const String& error) {
+        const String save_path = resolve_output_path(get_string_option(options, "output_path", String()));
+        return make_result(
+            false,
+            save_path,
+            make_primary_hit_mask_path(save_path),
+            error,
+            image_size,
+            std::max(get_int_option(options, "samples_per_pixel", 1), 1),
+            make_timing_log_path(save_path),
+            0.0,
+            selection,
+            0,
+            LightStatistics(),
+            0,
+            0,
+            0,
+            0.0
+        );
+    }
+
+    Dictionary render_scene_to_png_impl(Node* root,
+                                        Camera3D* camera,
+                                        Vector2i image_size,
+                                        const String& output_path,
+                                        int32_t samples_per_pixel,
+                                        int32_t max_depth,
+                                        int64_t seed,
+                                        const RenderSelection& selection) {
+        const auto total_start = TimingClock::now();
+        RenderRequest request;
+        Dictionary error_result;
+        if (!prepare_render_request(root, camera, image_size, output_path, samples_per_pixel, max_depth, seed,
+                                    selection, total_start, &request, &error_result)) {
+            return error_result;
+        }
+
+        const RenderOutcome outcome = execute_render_request(request, "sync", nullptr, nullptr);
+        return make_result(outcome.ok, outcome.path, outcome.primary_hit_mask_path, outcome.error, outcome.image_size,
+                           outcome.samples_per_pixel, outcome.timing_log_path, outcome.total_ms,
+                           outcome.selection, outcome.triangle_count, outcome.light_statistics,
+                           outcome.primary_ray_count, outcome.primary_ray_hit_count, outcome.primary_ray_miss_count,
+                           outcome.intersection_ms);
+    }
+
+    Dictionary start_render_scene_to_png_impl(Node* root,
+                                              Camera3D* camera,
+                                              Vector2i image_size,
+                                              const String& output_path,
+                                              int32_t samples_per_pixel,
+                                              int32_t max_depth,
+                                              int64_t seed,
+                                              const RenderSelection& selection) {
+        const auto total_start = TimingClock::now();
+        RenderRequest request;
+        Dictionary error_result;
+        if (!prepare_render_request(root, camera, image_size, output_path, samples_per_pixel, max_depth, seed,
+                                    selection, total_start, &request, &error_result)) {
+            return make_validation_job_error(error_result);
+        }
+
+        const auto start_worker_start = TimingClock::now();
+        std::shared_ptr<RenderJob> job = std::make_shared<RenderJob>();
+        job->id = g_next_job_id.fetch_add(1, std::memory_order_relaxed);
+        job->request = request;
+        job->total_tiles = request.selection.mode == RenderMode::Full
+                               ? total_tile_count(request.settings.image_size)
+                               : 1;
+
+        job->worker = std::thread([job]() {
+            while (!job->worker_can_start.load(std::memory_order_acquire)) {
+                std::this_thread::yield();
+            }
+
+            const RenderOutcome outcome = execute_render_request(job->request, "async",
+                                                                 &job->cancel_requested, &job->tiles_done);
+            {
+                std::lock_guard<std::mutex> result_lock(job->result_mutex);
+                job->outcome = outcome;
+            }
+            job->done.store(true, std::memory_order_release);
+        });
+
+        {
+            std::lock_guard<std::mutex> jobs_lock(g_jobs_mutex);
+            g_render_jobs[job->id] = job;
+        }
+        add_timing(&job->request.timing_entries, "start_worker", elapsed_ms(start_worker_start));
+        job->outcome = make_initial_outcome(job->request);
+        job->worker_can_start.store(true, std::memory_order_release);
+
+        return make_job_result(job->id, true, false, false, 0.0, true, request.save_path,
+                               request.primary_hit_mask_path, String(), request.settings.image_size,
+                               request.settings.samples_per_pixel, request.timing_log_path, 0.0,
+                               request.selection, request.scene.triangle_count(),
+                               job->outcome.light_statistics, job->outcome.primary_ray_count,
+                               job->outcome.primary_ray_hit_count, job->outcome.primary_ray_miss_count, 0.0);
     }
 
     // 调用方已经持有 g_jobs_mutex 时使用这个 helper。
@@ -992,13 +1225,12 @@ void RayTraceExporter::_bind_methods() {
     ClassDB::bind_static_method(
         "RayTraceExporter",
         D_METHOD("render_scene_to_png", "root", "camera", "image_size", "output_path",
-                 "samples_per_pixel", "max_depth", "seed", "single_ray_mode"),
+                 "samples_per_pixel", "max_depth", "seed"),
         &RayTraceExporter::render_scene_to_png,
         DEFVAL(String()),
         DEFVAL(1),
         DEFVAL(2),
-        DEFVAL(1),
-        DEFVAL(false)
+        DEFVAL(1)
     );
     ClassDB::bind_static_method(
         "RayTraceExporter",
@@ -1008,13 +1240,12 @@ void RayTraceExporter::_bind_methods() {
     ClassDB::bind_static_method(
         "RayTraceExporter",
         D_METHOD("start_render_scene_to_png", "root", "camera", "image_size", "output_path",
-                 "samples_per_pixel", "max_depth", "seed", "single_ray_mode"),
+                 "samples_per_pixel", "max_depth", "seed"),
         &RayTraceExporter::start_render_scene_to_png,
         DEFVAL(String()),
         DEFVAL(1),
         DEFVAL(2),
-        DEFVAL(1),
-        DEFVAL(false)
+        DEFVAL(1)
     );
     ClassDB::bind_static_method(
         "RayTraceExporter",
@@ -1046,22 +1277,17 @@ Dictionary RayTraceExporter::render_scene_to_png(Node* root,
                                                  const String& output_path,
                                                  int32_t samples_per_pixel,
                                                  int32_t max_depth,
-                                                 int64_t seed,
-                                                 bool single_ray_mode) {
-    const auto total_start = TimingClock::now();
-    RenderRequest request;
-    Dictionary error_result;
-    if (!prepare_render_request(root, camera, image_size, output_path, samples_per_pixel, max_depth, seed,
-                                single_ray_mode, total_start, &request, &error_result)) {
-        return error_result;
-    }
-
-    const RenderOutcome outcome = execute_render_request(request, "sync", nullptr, nullptr);
-    return make_result(outcome.ok, outcome.path, outcome.primary_hit_mask_path, outcome.error, outcome.image_size,
-                       outcome.samples_per_pixel, outcome.timing_log_path, outcome.total_ms,
-                       outcome.single_ray_mode, outcome.triangle_count, outcome.light_statistics,
-                       outcome.primary_ray_count, outcome.primary_ray_hit_count, outcome.primary_ray_miss_count,
-                       outcome.intersection_ms);
+                                                 int64_t seed) {
+    return render_scene_to_png_impl(
+        root,
+        camera,
+        image_size,
+        output_path,
+        samples_per_pixel,
+        max_depth,
+        seed,
+        RenderSelection()
+    );
 }
 
 // GDScript 的 ClassDB.class_call_static 最多只能传 5 个方法参数。
@@ -1070,7 +1296,13 @@ Dictionary RayTraceExporter::render_scene_to_png_with_options(Node* root,
                                                               Camera3D* camera,
                                                               Vector2i image_size,
                                                               const Dictionary& options) {
-    return render_scene_to_png(
+    RenderSelection selection;
+    String error;
+    if (!parse_render_selection(options, &selection, &error)) {
+        return make_selection_error_result(options, image_size, selection, error);
+    }
+
+    return render_scene_to_png_impl(
         root,
         camera,
         image_size,
@@ -1078,7 +1310,7 @@ Dictionary RayTraceExporter::render_scene_to_png_with_options(Node* root,
         get_int_option(options, "samples_per_pixel", 1),
         get_int_option(options, "max_depth", 2),
         get_int64_option(options, "seed", 1),
-        get_bool_option(options, "single_ray_mode", false)
+        selection
     );
 }
 
@@ -1090,51 +1322,17 @@ Dictionary RayTraceExporter::start_render_scene_to_png(Node* root,
                                                        const String& output_path,
                                                        int32_t samples_per_pixel,
                                                        int32_t max_depth,
-                                                       int64_t seed,
-                                                       bool single_ray_mode) {
-    const auto total_start = TimingClock::now();
-    RenderRequest request;
-    Dictionary error_result;
-    if (!prepare_render_request(root, camera, image_size, output_path, samples_per_pixel, max_depth, seed,
-                                single_ray_mode, total_start, &request, &error_result)) {
-        return make_validation_job_error(error_result);
-    }
-
-    const auto start_worker_start = TimingClock::now();
-    std::shared_ptr<RenderJob> job = std::make_shared<RenderJob>();
-    job->id = g_next_job_id.fetch_add(1, std::memory_order_relaxed);
-    job->request = request;
-    job->total_tiles = request.settings.single_ray_mode ? 1 : total_tile_count(request.settings.image_size);
-
-    job->worker = std::thread([job]() {
-        // 等主线程完成任务登记后再开始渲染，避免极快失败时 poll/release 看不到 job。
-        while (!job->worker_can_start.load(std::memory_order_acquire)) {
-            std::this_thread::yield();
-        }
-
-        const RenderOutcome outcome = execute_render_request(job->request, "async",
-                                                             &job->cancel_requested, &job->tiles_done);
-        {
-            std::lock_guard<std::mutex> result_lock(job->result_mutex);
-            job->outcome = outcome;
-        }
-        job->done.store(true, std::memory_order_release);
-    });
-
-    {
-        std::lock_guard<std::mutex> jobs_lock(g_jobs_mutex);
-        g_render_jobs[job->id] = job;
-    }
-    add_timing(&job->request.timing_entries, "start_worker", elapsed_ms(start_worker_start));
-    job->outcome = make_initial_outcome(job->request);
-    job->worker_can_start.store(true, std::memory_order_release);
-
-    return make_job_result(job->id, true, false, false, 0.0, true, request.save_path,
-                           request.primary_hit_mask_path, String(), request.settings.image_size,
-                           request.settings.samples_per_pixel, request.timing_log_path, 0.0,
-                           request.settings.single_ray_mode, request.scene.triangle_count(),
-                           job->outcome.light_statistics, job->outcome.primary_ray_count,
-                           job->outcome.primary_ray_hit_count, job->outcome.primary_ray_miss_count, 0.0);
+                                                       int64_t seed) {
+    return start_render_scene_to_png_impl(
+        root,
+        camera,
+        image_size,
+        output_path,
+        samples_per_pixel,
+        max_depth,
+        seed,
+        RenderSelection()
+    );
 }
 
 // 供编辑器插件使用的低参数包装入口；实际渲染流程仍委托给原有 start_render_scene_to_png。
@@ -1142,7 +1340,13 @@ Dictionary RayTraceExporter::start_render_scene_to_png_with_options(Node* root,
                                                                     Camera3D* camera,
                                                                     Vector2i image_size,
                                                                     const Dictionary& options) {
-    return start_render_scene_to_png(
+    RenderSelection selection;
+    String error;
+    if (!parse_render_selection(options, &selection, &error)) {
+        return make_validation_job_error(make_selection_error_result(options, image_size, selection, error));
+    }
+
+    return start_render_scene_to_png_impl(
         root,
         camera,
         image_size,
@@ -1150,7 +1354,7 @@ Dictionary RayTraceExporter::start_render_scene_to_png_with_options(Node* root,
         get_int_option(options, "samples_per_pixel", 1),
         get_int_option(options, "max_depth", 2),
         get_int64_option(options, "seed", 1),
-        get_bool_option(options, "single_ray_mode", false)
+        selection
     );
 }
 
@@ -1211,7 +1415,9 @@ Dictionary RayTraceExporter::release_render_job(int64_t job_id) {
     result["primary_hit_mask_path"] = job->outcome.primary_hit_mask_path;
     result["timing_log_path"] = job->outcome.timing_log_path;
     result["total_ms"] = job->outcome.total_ms;
-    result["single_ray_mode"] = job->outcome.single_ray_mode;
+    result["render_mode"] = String(render_mode_name(job->outcome.selection.mode));
+    result["target_pixel"] = job->outcome.selection.target_pixel;
+    result["target_tile"] = job->outcome.selection.target_tile;
     result["triangle_count"] = job->outcome.triangle_count;
     add_light_statistics_to_result(result, job->outcome.light_statistics);
     add_primary_ray_statistics_to_result(result, job->outcome.primary_ray_count,
