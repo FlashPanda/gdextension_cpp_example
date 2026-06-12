@@ -288,6 +288,8 @@ namespace {
 
     // 统一生成返回给 GDScript/编辑器侧的基础结果字典。
     // 字段名保持稳定，调用方可以用 ok/error 判断失败，用 path/timing_log_path 找到产物。
+    String make_tile_debug_path(const String& output_path, const RenderSelection& selection);
+
     Dictionary make_result(bool ok,
                            const String& path,
                            const String& primary_hit_mask_path,
@@ -308,6 +310,7 @@ namespace {
         result["path"] = path;
         result["primary_hit_mask_path"] = primary_hit_mask_path;
         result["timing_log_path"] = timing_log_path;
+        result["tile_debug_path"] = make_tile_debug_path(path, selection);
         result["error"] = error;
         result["width"] = image_size.x;
         result["height"] = image_size.y;
@@ -516,6 +519,22 @@ namespace {
         return basename + String("_primary_hit_mask.png");
     }
 
+    String make_tile_debug_path(const String& output_path, const RenderSelection& selection) {
+        if (selection.mode != RenderMode::Tile) {
+            return String();
+        }
+
+        const String suffix = String("_tile_") +
+                              String::num_int64(selection.target_tile.x) + String("_") +
+                              String::num_int64(selection.target_tile.y) + String("_debug.png");
+        const String basename = output_path.get_basename();
+        if (basename.is_empty()) {
+            return output_path + suffix;
+        }
+
+        return basename + suffix;
+    }
+
     // timing log 中使用稳定的短状态名，避免把 Godot Dictionary 的字段格式耦合到日志文本。
     const char* status_name(const RenderOutcome& outcome) {
         if (outcome.ok) {
@@ -537,6 +556,277 @@ namespace {
                                      ? godot_rt::CameraFovAxis::Horizontal
                                      : godot_rt::CameraFovAxis::Vertical;
         return render_camera;
+    }
+
+    // Tile debug overlay drawing helpers.
+    bool is_inside_image(const Vector2i& image_size, int x, int y) {
+        return x >= 0 && y >= 0 && x < image_size.x && y < image_size.y;
+    }
+
+    void blend_pixel(const Ref<Image>& image, const Vector2i& image_size, int x, int y, const Color& color) {
+        if (image.is_null() || !is_inside_image(image_size, x, y)) {
+            return;
+        }
+
+        const float alpha = clamp01(color.a);
+        const float inverse_alpha = 1.0f - alpha;
+        const Color base = image->get_pixel(x, y);
+        image->set_pixel(
+            x,
+            y,
+            Color(
+                clamp01(base.r * inverse_alpha + color.r * alpha),
+                clamp01(base.g * inverse_alpha + color.g * alpha),
+                clamp01(base.b * inverse_alpha + color.b * alpha),
+                1.0f
+            )
+        );
+    }
+
+    void blend_rect(const Ref<Image>& image,
+                    const Vector2i& image_size,
+                    const Vector2i& origin,
+                    const Vector2i& size,
+                    const Color& color) {
+        if (image.is_null() || size.x <= 0 || size.y <= 0) {
+            return;
+        }
+
+        const int x_begin = std::max(origin.x, 0);
+        const int y_begin = std::max(origin.y, 0);
+        const int x_end = std::min(origin.x + size.x, image_size.x);
+        const int y_end = std::min(origin.y + size.y, image_size.y);
+        for (int y = y_begin; y < y_end; ++y) {
+            for (int x = x_begin; x < x_end; ++x) {
+                blend_pixel(image, image_size, x, y, color);
+            }
+        }
+    }
+
+    void blend_outline_rect(const Ref<Image>& image,
+                            const Vector2i& image_size,
+                            const Vector2i& origin,
+                            const Vector2i& size,
+                            const Color& color,
+                            int thickness) {
+        if (size.x <= 0 || size.y <= 0 || thickness <= 0) {
+            return;
+        }
+
+        for (int i = 0; i < thickness; ++i) {
+            blend_rect(image, image_size, Vector2i(origin.x, origin.y + i), Vector2i(size.x, 1), color);
+            blend_rect(image, image_size, Vector2i(origin.x, origin.y + size.y - 1 - i), Vector2i(size.x, 1), color);
+            blend_rect(image, image_size, Vector2i(origin.x + i, origin.y), Vector2i(1, size.y), color);
+            blend_rect(image, image_size, Vector2i(origin.x + size.x - 1 - i, origin.y), Vector2i(1, size.y), color);
+        }
+    }
+
+    const char* const* debug_glyph_rows(char32_t ch) {
+        static const char* const glyph_0[7] = { "#####", "#...#", "#..##", "#.#.#", "##..#", "#...#", "#####" };
+        static const char* const glyph_1[7] = { "..#..", ".##..", "..#..", "..#..", "..#..", "..#..", ".###." };
+        static const char* const glyph_2[7] = { "#####", "....#", "....#", "#####", "#....", "#....", "#####" };
+        static const char* const glyph_3[7] = { "#####", "....#", "....#", ".####", "....#", "....#", "#####" };
+        static const char* const glyph_4[7] = { "#...#", "#...#", "#...#", "#####", "....#", "....#", "....#" };
+        static const char* const glyph_5[7] = { "#####", "#....", "#....", "#####", "....#", "....#", "#####" };
+        static const char* const glyph_6[7] = { "#####", "#....", "#....", "#####", "#...#", "#...#", "#####" };
+        static const char* const glyph_7[7] = { "#####", "....#", "...#.", "..#..", ".#...", ".#...", ".#..." };
+        static const char* const glyph_8[7] = { "#####", "#...#", "#...#", "#####", "#...#", "#...#", "#####" };
+        static const char* const glyph_9[7] = { "#####", "#...#", "#...#", "#####", "....#", "....#", "#####" };
+        static const char* const glyph_t[7] = { "#####", "..#..", "..#..", "..#..", "..#..", "..#..", "..##." };
+        static const char* const glyph_i[7] = { ".###.", "..#..", ".....", ".##..", "..#..", "..#..", ".###." };
+        static const char* const glyph_l[7] = { ".##..", "..#..", "..#..", "..#..", "..#..", "..#..", ".###." };
+        static const char* const glyph_e[7] = { ".....", ".....", ".###.", "#...#", "#####", "#....", ".###." };
+        static const char* const glyph_p[7] = { ".....", ".....", "####.", "#...#", "####.", "#....", "#...." };
+        static const char* const glyph_x[7] = { ".....", ".....", "#...#", ".#.#.", "..#..", ".#.#.", "#...#" };
+        static const char* const glyph_equal[7] = { ".....", ".....", "#####", ".....", "#####", ".....", "....." };
+        static const char* const glyph_comma[7] = { ".....", ".....", ".....", ".....", ".....", "..#..", ".#..." };
+        static const char* const glyph_minus[7] = { ".....", ".....", ".....", "#####", ".....", ".....", "....." };
+        static const char* const glyph_blank[7] = { ".....", ".....", ".....", ".....", ".....", ".....", "....." };
+
+        switch (ch) {
+            case '0':
+                return glyph_0;
+            case '1':
+                return glyph_1;
+            case '2':
+                return glyph_2;
+            case '3':
+                return glyph_3;
+            case '4':
+                return glyph_4;
+            case '5':
+                return glyph_5;
+            case '6':
+                return glyph_6;
+            case '7':
+                return glyph_7;
+            case '8':
+                return glyph_8;
+            case '9':
+                return glyph_9;
+            case 't':
+                return glyph_t;
+            case 'i':
+                return glyph_i;
+            case 'l':
+                return glyph_l;
+            case 'e':
+                return glyph_e;
+            case 'p':
+                return glyph_p;
+            case 'x':
+                return glyph_x;
+            case '=':
+                return glyph_equal;
+            case ',':
+                return glyph_comma;
+            case '-':
+                return glyph_minus;
+            default:
+                return glyph_blank;
+        }
+    }
+
+    int debug_text_width(const String& text, int scale) {
+        const int64_t length = text.length();
+        if (length <= 0 || scale <= 0) {
+            return 0;
+        }
+
+        constexpr int glyph_width = 5;
+        return static_cast<int>(length * (glyph_width + 1) * scale - scale);
+    }
+
+    void draw_debug_text(const Ref<Image>& image,
+                         const Vector2i& image_size,
+                         const Vector2i& origin,
+                         const String& text,
+                         const Color& color,
+                         int scale) {
+        if (image.is_null() || scale <= 0) {
+            return;
+        }
+
+        constexpr int glyph_width = 5;
+        constexpr int glyph_height = 7;
+        int cursor_x = origin.x;
+        for (int64_t index = 0; index < text.length(); ++index) {
+            const char* const* rows = debug_glyph_rows(text[index]);
+            for (int row = 0; row < glyph_height; ++row) {
+                for (int column = 0; column < glyph_width; ++column) {
+                    if (rows[row][column] != '#') {
+                        continue;
+                    }
+
+                    blend_rect(
+                        image,
+                        image_size,
+                        Vector2i(cursor_x + column * scale, origin.y + row * scale),
+                        Vector2i(scale, scale),
+                        color
+                    );
+                }
+            }
+            cursor_x += (glyph_width + 1) * scale;
+        }
+    }
+
+    Ref<Image> tile_debug_overlay_to_image(const Ref<Image>& source,
+                                           const Vector2i& image_size,
+                                           const Vector2i& target_tile) {
+        Ref<Image> image = Image::create_empty(image_size.x, image_size.y, false, Image::FORMAT_RGBA8);
+        if (image.is_null() || source.is_null()) {
+            return image;
+        }
+
+        image->copy_from(source);
+
+        const Vector2i tile_origin(target_tile.x * TILE_SIZE, target_tile.y * TILE_SIZE);
+        const Vector2i selected_tile_size(
+            std::min(TILE_SIZE, image_size.x - tile_origin.x),
+            std::min(TILE_SIZE, image_size.y - tile_origin.y)
+        );
+
+        const Color grid_color(1.0f, 1.0f, 1.0f, 0.24f);
+        const Color selected_fill_color(1.0f, 0.05f, 0.03f, 0.24f);
+        const Color selected_border_color(1.0f, 0.02f, 0.02f, 1.0f);
+        const Color selected_inner_border_color(1.0f, 0.95f, 0.05f, 0.85f);
+        const Color label_background_color(0.0f, 0.0f, 0.0f, 0.76f);
+        const Color label_border_color(1.0f, 0.95f, 0.05f, 0.85f);
+        const Color label_title_color(1.0f, 0.95f, 0.05f, 1.0f);
+        const Color label_detail_color(1.0f, 1.0f, 1.0f, 1.0f);
+
+        blend_rect(image, image_size, tile_origin, selected_tile_size, selected_fill_color);
+
+        for (int x = 0; x < image_size.x; x += TILE_SIZE) {
+            blend_rect(image, image_size, Vector2i(x, 0), Vector2i(1, image_size.y), grid_color);
+        }
+        for (int y = 0; y < image_size.y; y += TILE_SIZE) {
+            blend_rect(image, image_size, Vector2i(0, y), Vector2i(image_size.x, 1), grid_color);
+        }
+
+        blend_outline_rect(image, image_size, tile_origin, selected_tile_size, selected_border_color, 2);
+        if (selected_tile_size.x > 4 && selected_tile_size.y > 4) {
+            blend_outline_rect(
+                image,
+                image_size,
+                Vector2i(tile_origin.x + 2, tile_origin.y + 2),
+                Vector2i(selected_tile_size.x - 4, selected_tile_size.y - 4),
+                selected_inner_border_color,
+                1
+            );
+        }
+
+        const int x_end = tile_origin.x + selected_tile_size.x - 1;
+        const int y_end = tile_origin.y + selected_tile_size.y - 1;
+        const String tile_label = String("tile=") +
+                                  String::num_int64(target_tile.x) + String(",") +
+                                  String::num_int64(target_tile.y);
+        const String pixel_label = String("px=") +
+                                   String::num_int64(tile_origin.x) + String(",") +
+                                   String::num_int64(tile_origin.y) + String("-") +
+                                   String::num_int64(x_end) + String(",") +
+                                   String::num_int64(y_end);
+
+        constexpr int padding = 3;
+        constexpr int title_scale = 2;
+        constexpr int detail_scale = 1;
+        constexpr int glyph_height = 7;
+        constexpr int line_gap = 3;
+        const int title_height = glyph_height * title_scale;
+        const int detail_height = glyph_height * detail_scale;
+        const int label_width = std::max(debug_text_width(tile_label, title_scale),
+                                         debug_text_width(pixel_label, detail_scale)) +
+                                padding * 2;
+        const int label_height = title_height + line_gap + detail_height + padding * 2;
+        Vector2i label_origin(tile_origin.x + 3, tile_origin.y + 3);
+        if (label_origin.x + label_width > image_size.x) {
+            label_origin.x = std::max(0, image_size.x - label_width);
+        }
+        if (label_origin.y + label_height > image_size.y) {
+            label_origin.y = std::max(0, image_size.y - label_height);
+        }
+
+        blend_rect(image, image_size, label_origin, Vector2i(label_width, label_height), label_background_color);
+        blend_outline_rect(image, image_size, label_origin, Vector2i(label_width, label_height), label_border_color, 1);
+        draw_debug_text(
+            image,
+            image_size,
+            Vector2i(label_origin.x + padding, label_origin.y + padding),
+            tile_label,
+            label_title_color,
+            title_scale
+        );
+        draw_debug_text(
+            image,
+            image_size,
+            Vector2i(label_origin.x + padding, label_origin.y + padding + title_height + line_gap),
+            pixel_label,
+            label_detail_color,
+            detail_scale
+        );
+
+        return image;
     }
 
     // 保存 PNG 前先确保目标目录存在；失败信息通过 error 返回给 Dictionary。
@@ -673,6 +963,10 @@ namespace {
         file->store_line(String("mode: ") + String(mode));
         file->store_line(String("output: ") + request.save_path);
         file->store_line(String("primary_hit_mask_path: ") + outcome.primary_hit_mask_path);
+        const String tile_debug_path = make_tile_debug_path(request.save_path, request.selection);
+        if (!tile_debug_path.is_empty()) {
+            file->store_line(String("tile_debug_path: ") + tile_debug_path);
+        }
         file->store_line(String("timing_log: ") + request.timing_log_path);
         file->store_line(String("image_size: ") + String::num_int64(request.settings.image_size.x) + "x" +
                          String::num_int64(request.settings.image_size.y));
@@ -1059,6 +1353,38 @@ namespace {
             return outcome;
         }
 
+        if (request.selection.mode == RenderMode::Tile) {
+            const auto tile_debug_to_image_start = TimingClock::now();
+            Ref<Image> tile_debug_image = tile_debug_overlay_to_image(
+                image,
+                request.settings.image_size,
+                request.selection.target_tile
+            );
+            add_timing(&timing_entries, "tile_debug_to_image", elapsed_ms(tile_debug_to_image_start));
+            if (tile_debug_image.is_null()) {
+                outcome.error = "Could not create tile debug image.";
+                outcome.tiles_done = effective_tiles_done->load(std::memory_order_relaxed);
+                outcome.timing_entries = timing_entries;
+                outcome.total_ms = elapsed_ms(request.total_start);
+                write_timing_log(request, outcome, mode);
+                return outcome;
+            }
+
+            const auto save_tile_debug_png_start = TimingClock::now();
+            const Error save_tile_debug_error = tile_debug_image->save_png(
+                make_tile_debug_path(request.save_path, request.selection)
+            );
+            add_timing(&timing_entries, "save_tile_debug_png", elapsed_ms(save_tile_debug_png_start));
+            if (save_tile_debug_error != OK) {
+                outcome.error = "Could not save tile debug PNG.";
+                outcome.tiles_done = effective_tiles_done->load(std::memory_order_relaxed);
+                outcome.timing_entries = timing_entries;
+                outcome.total_ms = elapsed_ms(request.total_start);
+                write_timing_log(request, outcome, mode);
+                return outcome;
+            }
+        }
+
         outcome.ok = true;
         outcome.tiles_done = effective_tiles_done->load(std::memory_order_relaxed);
         outcome.timing_entries = timing_entries;
@@ -1413,6 +1739,7 @@ Dictionary RayTraceExporter::release_render_job(int64_t job_id) {
     result["released"] = true;
     result["job_id"] = job_id;
     result["primary_hit_mask_path"] = job->outcome.primary_hit_mask_path;
+    result["tile_debug_path"] = make_tile_debug_path(job->outcome.path, job->outcome.selection);
     result["timing_log_path"] = job->outcome.timing_log_path;
     result["total_ms"] = job->outcome.total_ms;
     result["render_mode"] = String(render_mode_name(job->outcome.selection.mode));

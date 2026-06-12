@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "../accel/accel_interface.h"
+#include "../util/logger.h"
 #include "bsdf/GodotStandardBrdf.h"
 
 namespace godot_rt {
@@ -236,6 +237,17 @@ TraceResult RandomWalkIntegrator::trace(const RayDifferential& ray, Rng& rng) co
                 continue;
             }
 
+            Logger::info(
+                godot::String("before add_direct_lighting: radiance=(") +
+                godot::String::num(radiance.r, 6) + ", " +
+                godot::String::num(radiance.g, 6) + ", " +
+                godot::String::num(radiance.b, 6) + ", " +
+                godot::String::num(radiance.a, 6) + "), light_sample.radiance=(" +
+                godot::String::num(light_sample.radiance.r, 6) + ", " +
+                godot::String::num(light_sample.radiance.g, 6) + ", " +
+                godot::String::num(light_sample.radiance.b, 6) + ", " +
+                godot::String::num(light_sample.radiance.a, 6) + ")"
+            );
             add_direct_lighting(radiance, throughput, f, light_sample.radiance, cos_theta);
         }
 

@@ -380,6 +380,13 @@ func _print_render_statistics(triangle_count: int, intersection_ms: float, resul
 		else:
 			print("Ray trace primary hit mask path: %s" % primary_hit_mask_path)
 
+	var tile_debug_path := String(result.get("tile_debug_path", ""))
+	if not tile_debug_path.is_empty():
+		if bool(result.get("ok", false)):
+			print("Ray trace tile debug overlay saved to %s" % tile_debug_path)
+		else:
+			print("Ray trace tile debug overlay path: %s" % tile_debug_path)
+
 	print(
 		"Ray trace lights: %d (directional: %d, omni: %d, spot: %d, shadow: %d)" % [
 			int(result.get("light_count", 0)),
