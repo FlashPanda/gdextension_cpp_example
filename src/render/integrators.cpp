@@ -164,6 +164,13 @@ TraceResult RandomWalkIntegrator::trace(const RayDifferential& ray, Rng& rng) co
     RayDifferential current_ray = ray;
 
     for (int depth = 0; depth < max_depth; ++depth) {
+        Logger::info(
+            godot::String("current ray: ") +
+            godot::String(current_ray.to_string().c_str()) +
+            godot::String(", depth = ") +
+            godot::String::num_int64(depth)
+        );
+
         Hit hit;
         const bool ray_hit = intersect(current_ray, &hit);
         if (depth == 0) {
@@ -271,6 +278,14 @@ TraceResult RandomWalkIntegrator::trace(const RayDifferential& ray, Rng& rng) co
 
     radiance.a = 1.0f;
     result.radiance = radiance;
+
+    Logger::info(
+        godot::String("final radiance=(") +
+        godot::String::num(result.radiance.r, 6) + ", " +
+        godot::String::num(result.radiance.g, 6) + ", " +
+        godot::String::num(result.radiance.b, 6) + ", " +
+        godot::String::num(result.radiance.a, 6) + ")"
+    );
     return result;
 }
 
