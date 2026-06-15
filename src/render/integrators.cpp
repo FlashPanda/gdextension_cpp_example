@@ -186,6 +186,9 @@ TraceResult RandomWalkIntegrator::trace(const RayDifferential& ray, Rng& rng) co
             }
         }
         if (!ray_hit) {
+            Logger::info(
+    godot::String("!ray_hit")
+);
             break;
         }
 
@@ -197,6 +200,7 @@ TraceResult RandomWalkIntegrator::trace(const RayDifferential& ray, Rng& rng) co
 
         godot::Vector3 normal = hit.normal;
         if (normal.length_squared() == 0.0f) {
+            Logger::info(godot::String("!normal.length_squared() == 0.0f"));
             break;
         }
         normal.normalize();
@@ -206,10 +210,12 @@ TraceResult RandomWalkIntegrator::trace(const RayDifferential& ray, Rng& rng) co
 
         godot::Vector3 wo = -current_ray.d;
         if (wo.length_squared() == 0.0f) {
+            Logger::info(godot::String("wo.length_squared() == 0.0f"));
             break;
         }
         wo.normalize();
         if (normal.dot(wo) <= 0.0f) {
+            Logger::info(godot::String("normal.dot(wo) <= 0.0f"));
             break;
         }
 
@@ -219,11 +225,13 @@ TraceResult RandomWalkIntegrator::trace(const RayDifferential& ray, Rng& rng) co
         for (const Light& light : scene->get_lights()) {
             const LightSample light_sample = light.sample_li(hit.position);
             if (!light_sample.valid) {
+                Logger::info(godot::String("!light_sample.valid"));
                 continue;
             }
 
             const real_t cos_theta = normal.dot(light_sample.wi);
             if (cos_theta <= 0.0) {
+                Logger::info(godot::String("cos_theta <= 0.0"));
                 continue;
             }
 
@@ -241,6 +249,7 @@ TraceResult RandomWalkIntegrator::trace(const RayDifferential& ray, Rng& rng) co
 
             const godot::Color f = bsdf.eval(wo, light_sample.wi);
             if (brdf::is_black(f)) {
+                Logger::info(godot::String("brdf::is_black(f)"));
                 continue;
             }
 
@@ -270,6 +279,7 @@ TraceResult RandomWalkIntegrator::trace(const RayDifferential& ray, Rng& rng) co
             static_cast<float>(sample_cos_theta) / bsdf_sample.pdf
         );
         if (brdf::max_rgb(throughput) <= 0.0f) {
+            Logger::info(godot::String("brdf::max_rgb(throughput) <= 0.0f"));
             break;
         }
 
