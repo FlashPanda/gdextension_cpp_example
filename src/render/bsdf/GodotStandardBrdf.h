@@ -113,7 +113,6 @@ namespace godot_standard_detail {
         const float dielectric_f0 = 0.16f * params.specular * params.specular;
         return brdf::mix(brdf::color(dielectric_f0), params.base_color, params.metallic);
     }
-
 }
 
     inline GodotStandardParams make_godot_standard_params(const Material& material,
@@ -196,14 +195,14 @@ namespace godot_standard_detail {
             }
 
             const float roughness = brdf::saturate(params.roughness);
-            const float alpha = std::max(roughness * roughness, brdf::MIN_ROUGHNESS);
-            const float metallic = brdf::saturate(params.metallic);
 
+            const float metallic = brdf::saturate(params.metallic);
             const godot::Color diffuse = brdf::scale(
                 brdf::eval_burley_diffuse(params.base_color, roughness, no_v, no_l, lo_h),
                 1.0f - metallic
             );
 
+            const float alpha = std::max(roughness * roughness, brdf::MIN_ROUGHNESS);
             const godot::Color fresnel = brdf::fresnel_schlick(vo_h, godot_standard_detail::godot_f0(params));
             const float specular_scale = brdf::d_ggx(no_h, alpha) * brdf::v_smith_ggx(no_l, no_v, alpha);
             const godot::Color specular = brdf::scale(fresnel, specular_scale);

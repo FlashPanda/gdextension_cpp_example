@@ -15,6 +15,7 @@ namespace brdf {
     constexpr float INV_PI = 0.31830988618379067154f;
     constexpr float MIN_ROUGHNESS = 0.001f;
 
+    // 方向变换
     struct ShadingFrame {
         godot::Vector3 tangent;
         godot::Vector3 bitangent;

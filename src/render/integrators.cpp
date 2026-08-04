@@ -186,9 +186,7 @@ TraceResult RandomWalkIntegrator::trace(const RayDifferential& ray, Rng& rng) co
             }
         }
         if (!ray_hit) {
-            Logger::info(
-    godot::String("!ray_hit")
-);
+            Logger::info(godot::String("!ray_hit"));
             break;
         }
 
@@ -204,8 +202,10 @@ TraceResult RandomWalkIntegrator::trace(const RayDifferential& ray, Rng& rng) co
             break;
         }
         normal.normalize();
+		// 不支持双面
         if (normal.dot(current_ray.d) > 0.0f) {
-            normal = -normal;
+            //normal = -normal;
+			break;
         }
 
         godot::Vector3 wo = -current_ray.d;
@@ -254,15 +254,24 @@ TraceResult RandomWalkIntegrator::trace(const RayDifferential& ray, Rng& rng) co
             }
 
             Logger::info(
-                godot::String("before add_direct_lighting: radiance=(") +
+                godot::String("add_direct_lighting: radiance=(") +
                 godot::String::num(radiance.r, 6) + ", " +
                 godot::String::num(radiance.g, 6) + ", " +
                 godot::String::num(radiance.b, 6) + ", " +
-                godot::String::num(radiance.a, 6) + "), light_sample.radiance=(" +
+                godot::String::num(radiance.a, 6) + "), throughput=(" +
+                godot::String::num(throughput.r, 6) + ", " +
+                godot::String::num(throughput.g, 6) + ", " +
+                godot::String::num(throughput.b, 6) + ", " +
+                godot::String::num(throughput.a, 6) + "), f=(" +
+                godot::String::num(f.r, 6) + ", " +
+                godot::String::num(f.g, 6) + ", " +
+                godot::String::num(f.b, 6) + ", " +
+                godot::String::num(f.a, 6) + "), light_sample.radiance=(" +
                 godot::String::num(light_sample.radiance.r, 6) + ", " +
                 godot::String::num(light_sample.radiance.g, 6) + ", " +
                 godot::String::num(light_sample.radiance.b, 6) + ", " +
-                godot::String::num(light_sample.radiance.a, 6) + ")"
+                godot::String::num(light_sample.radiance.a, 6) + "), cos_theta=" +
+                godot::String::num(static_cast<double>(cos_theta), 6)
             );
             add_direct_lighting(radiance, throughput, f, light_sample.radiance, cos_theta);
         }
