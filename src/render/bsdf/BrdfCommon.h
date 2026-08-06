@@ -132,25 +132,17 @@ namespace brdf {
         return a2 / std::max(PI * denom * denom, 0.000001f);
     }
 
-    inline float lambda_ggx(float no_w, float alpha) {
-        const float cos_theta = saturate(no_w);
-        if (cos_theta <= 0.0f) {
-            return 0.0f;
-        }
-
-        const float a = std::max(alpha, MIN_ROUGHNESS);
-        const float cos2 = cos_theta * cos_theta;
-        const float tan2 = std::max(1.0f - cos2, 0.0f) / std::max(cos2, 0.000001f);
-        return 0.5f * (std::sqrt(1.0f + a * a * tan2) - 1.0f);
-    }
-
-    inline float v_smith_ggx(float no_l, float no_v, float alpha) {
+    // Matches Godot renderer_rd/shaders/scene_forward_lights_inc.glsl::V_GGX().
+    // Earl Hammon, Jr. "PBR Diffuse Lighting for GGX+Smith Microsurfaces".
+    inline float v_ggx_hammon(float no_l, float no_v, float alpha) {
         if (no_l <= 0.0f || no_v <= 0.0f) {
             return 0.0f;
         }
 
-        const float g = 1.0f / (1.0f + lambda_ggx(no_l, alpha) + lambda_ggx(no_v, alpha));
-        return g / std::max(4.0f * no_l * no_v, 0.000001f);
+        const float denominator =
+            (1.0f - alpha) * (2.0f * no_l * no_v) +
+            alpha * (no_l + no_v);
+        return 0.5f / std::max(denominator, 0.000001f);
     }
 
     inline godot::Color eval_burley_diffuse(const godot::Color& base_color,

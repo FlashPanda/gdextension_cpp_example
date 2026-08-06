@@ -10,6 +10,7 @@
 #include <godot_cpp/classes/mesh.hpp>
 #include <godot_cpp/classes/mesh_instance3d.hpp>
 #include <godot_cpp/classes/omni_light3d.hpp>
+#include <godot_cpp/classes/project_settings.hpp>
 #include <godot_cpp/classes/spot_light3d.hpp>
 #include <godot_cpp/classes/texture2d.hpp>
 #include <godot_cpp/core/math.hpp>
@@ -234,6 +235,18 @@ namespace {
         return godot_light->is_visible();
     }
 
+    bool uses_physical_light_units() {
+        const godot::ProjectSettings* project_settings = godot::ProjectSettings::get_singleton();
+        if (project_settings == nullptr) {
+            return false;
+        }
+
+        static const godot::StringName setting_name(
+            "rendering/lights_and_shadows/use_physical_light_units"
+        );
+        return static_cast<bool>(project_settings->get_setting_with_override(setting_name));
+    }
+
     bool extract_light_type(godot::Light3D* godot_light, LightType& out_type) {
         if (godot::Object::cast_to<godot::DirectionalLight3D>(godot_light) != nullptr) {
             out_type = LightType::Directional;
@@ -355,10 +368,19 @@ void SceneExtractor::extract_light(godot::Light3D* godot_light, Scene& scene) co
     }
 
     light.transform = godot_light->get_global_transform();
-    light.color = godot_light->get_color();
-    light.energy = std::max(godot_light->get_param(godot::Light3D::PARAM_ENERGY), 0.0f);
+    // Match Godot's renderer light upload: Light3D color is sRGB and radiance is linear.
+    light.color = godot_light->get_color().srgb_to_linear();
+
+    const real_t energy_multiplier = uses_physical_light_units()
+        ? static_cast<real_t>(1.0)
+        : static_cast<real_t>(Math_PI);
+    light.energy = std::max(
+        godot_light->get_param(godot::Light3D::PARAM_ENERGY) * energy_multiplier,
+        static_cast<real_t>(0.0)
+    );
     light.range = std::max(godot_light->get_param(godot::Light3D::PARAM_RANGE), 0.0f);
-    light.attenuation = std::max(godot_light->get_param(godot::Light3D::PARAM_ATTENUATION), 0.0f);
+    // Godot uses PARAM_ATTENUATION directly as the distance decay exponent.
+    light.attenuation = godot_light->get_param(godot::Light3D::PARAM_ATTENUATION);
     light.spot_angle_radians = godot::Math::deg_to_rad(godot_light->get_param(godot::Light3D::PARAM_SPOT_ANGLE));
     light.spot_attenuation = std::max(godot_light->get_param(godot::Light3D::PARAM_SPOT_ATTENUATION), 0.0f);
     light.casts_shadow = godot_light->has_shadow();

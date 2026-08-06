@@ -17,21 +17,27 @@ namespace {
         );
     }
 
-    real_t distance_attenuation(real_t distance, real_t range, real_t attenuation) {
+    // Matches Godot renderer_rd/shaders/scene_forward_lights_inc.glsl::get_omni_attenuation().
+    real_t omni_attenuation(real_t distance, real_t range, real_t decay) {
         if (range <= 0.0) {
-            return 1.0;
-        }
-        if (distance >= range) {
             return 0.0;
         }
 
-        const real_t normalized_distance = std::max(distance / range, static_cast<real_t>(0.0));
-        const real_t falloff = std::max(static_cast<real_t>(1.0) - normalized_distance, static_cast<real_t>(0.0));
-        return std::pow(falloff, std::max(attenuation, static_cast<real_t>(0.0)));
-    }
+        real_t normalized_distance = std::max(distance / range, static_cast<real_t>(0.0));
+        normalized_distance *= normalized_distance;
+        normalized_distance *= normalized_distance; // (distance / range)^4
 
-    real_t inverse_square(real_t distance) {
-        return static_cast<real_t>(1.0) / std::max(distance * distance, static_cast<real_t>(1.0));
+        real_t range_falloff = std::max(
+            static_cast<real_t>(1.0) - normalized_distance,
+            static_cast<real_t>(0.0)
+        );
+        range_falloff *= range_falloff;
+
+        const real_t distance_falloff = std::pow(
+            std::max(distance, LIGHT_EPSILON),
+            -decay
+        );
+        return range_falloff * distance_falloff;
     }
 
     godot::Vector3 safe_normalized(const godot::Vector3& value, const godot::Vector3& fallback) {
@@ -81,8 +87,8 @@ LightSample Light::sample_li(const godot::Vector3& point) const {
         return sample;
     }
 
-    const real_t range_factor = distance_attenuation(distance, range, attenuation);
-    if (range_factor <= 0.0) {
+    const real_t distance_factor = omni_attenuation(distance, range, attenuation);
+    if (distance_factor <= 0.0) {
         return sample;
     }
 
@@ -105,7 +111,7 @@ LightSample Light::sample_li(const godot::Vector3& point) const {
         spot_factor = std::pow(normalized_cone, std::max(spot_attenuation, static_cast<real_t>(0.0)));
     }
 
-    const real_t scale = energy * range_factor * spot_factor * inverse_square(distance);
+    const real_t scale = energy * distance_factor * spot_factor;
     if (scale <= 0.0) {
         return sample;
     }

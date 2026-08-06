@@ -204,7 +204,7 @@ namespace godot_standard_detail {
 
             const float alpha = std::max(roughness * roughness, brdf::MIN_ROUGHNESS);
             const godot::Color fresnel = brdf::fresnel_schlick(vo_h, godot_standard_detail::godot_f0(params));
-            const float specular_scale = brdf::d_ggx(no_h, alpha) * brdf::v_smith_ggx(no_l, no_v, alpha);
+            const float specular_scale = brdf::d_ggx(no_h, alpha) * brdf::v_ggx_hammon(no_l, no_v, alpha);
             const godot::Color specular = brdf::scale(fresnel, specular_scale);
 
             return brdf::add(diffuse, specular);
