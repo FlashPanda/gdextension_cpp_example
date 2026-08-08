@@ -1,0 +1,10 @@
+^D:\GDEXTENSION_CPP_EXAMPLE\BUILD\REQ001-TESTS\CMAKEFILES\EAAE75C4D56E5F77E19135A5F0A35DBD\GENERATE.STAMP.RULE
+setlocal
+C:\Softwares\CMake\bin\cmake.exe -SD:/gdextension_cpp_example -BD:/gdextension_cpp_example/build/req001-tests --check-stamp-list CMakeFiles/generate.stamp.list --vs-solution-file D:/gdextension_cpp_example/build/req001-tests/gdextension_cpp_example_index.sln
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd

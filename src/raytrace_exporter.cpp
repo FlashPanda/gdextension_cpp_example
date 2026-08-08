@@ -13,14 +13,18 @@
 #include <vector>
 
 #include <godot_cpp/classes/dir_access.hpp>
+#include <godot_cpp/classes/environment.hpp>
 #include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/classes/image.hpp>
+#include <godot_cpp/classes/viewport.hpp>
+#include <godot_cpp/classes/world3d.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/core/math.hpp>
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/color.hpp>
 
 #include "accel/brute_force_accel.h"
+#include "render/color_postprocess.h"
 #include "render/cpu_path_tracer.h"
 #include "render/film.h"
 #include "render/frame_accumulator.h"
@@ -86,6 +90,7 @@ namespace {
         godot_rt::Scene scene;
         godot_rt::Camera camera;
         godot_rt::CpuPathTracerSettings settings;
+        godot_rt::OutputPostprocessSettings output_postprocess_settings;
         RenderSelection selection;
         String save_path;
         String primary_hit_mask_path;
@@ -558,6 +563,40 @@ namespace {
         return render_camera;
     }
 
+    // 在主线程读取 Godot Environment，再把纯标量复制到 RenderRequest。
+    // 对齐 RendererSceneCull::_render_get_environment()：Camera override 优先于 World3D。
+    godot_rt::OutputPostprocessSettings capture_output_postprocess_settings(const Camera3D* camera) {
+        if (camera == nullptr) {
+            return godot_rt::resolve_output_postprocess_settings(nullptr, nullptr);
+        }
+
+        const Ref<Environment> camera_environment = camera->get_environment();
+        if (camera_environment.is_valid()) {
+            const godot_rt::EnvironmentTonemapValues camera_values{
+                camera_environment->get_tonemap_exposure(),
+                camera_environment->get_tonemap_white(),
+            };
+            return godot_rt::resolve_output_postprocess_settings(&camera_values, nullptr);
+        }
+
+        Viewport* viewport = camera->get_viewport();
+        if (viewport != nullptr) {
+            const Ref<World3D> world = viewport->find_world_3d();
+            if (world.is_valid()) {
+                const Ref<Environment> world_environment = world->get_environment();
+                if (world_environment.is_valid()) {
+                    const godot_rt::EnvironmentTonemapValues world_values{
+                        world_environment->get_tonemap_exposure(),
+                        world_environment->get_tonemap_white(),
+                    };
+                    return godot_rt::resolve_output_postprocess_settings(nullptr, &world_values);
+                }
+            }
+        }
+
+        return godot_rt::resolve_output_postprocess_settings(nullptr, nullptr);
+    }
+
     // Tile debug overlay drawing helpers.
     bool is_inside_image(const Vector2i& image_size, int x, int y) {
         return x >= 0 && y >= 0 && x < image_size.x && y < image_size.y;
@@ -848,9 +887,38 @@ namespace {
         return true;
     }
 
-    // 将 Film 中的线性 radiance 均值写入 RGBA8 Image。
-    // 当前导出路径只做 0..1 clamp，不在这里引入 tone mapping，以免改变 Film 的原始累积语义。
-    Ref<Image> film_to_image(const godot_rt::Film& film, const Vector2i& image_size) {
+    // 将 Film 中的线性 HDR radiance 均值转换成显示编码后的 RGBA8 Image。
+    // Film 本身仍保留原始线性累积；曝光、tone mapping 与 sRGB 只在这里发生。
+    Ref<Image> film_to_image(const godot_rt::Film& film,
+                             const Vector2i& image_size,
+                             const godot_rt::OutputPostprocessSettings& output_postprocess_settings) {
+        Ref<Image> image = Image::create_empty(image_size.x, image_size.y, false, Image::FORMAT_RGBA8);
+        if (image.is_null()) {
+            return image;
+        }
+
+        for (int y = 0; y < image_size.y; ++y) {
+            for (int x = 0; x < image_size.x; ++x) {
+                const Color radiance = film.get_average(Vector2i(x, y));
+                const godot_rt::RgbColor display_color = godot_rt::postprocess_linear_radiance(
+                    godot_rt::RgbColor{radiance.r, radiance.g, radiance.b},
+                    output_postprocess_settings
+                );
+                image->set_pixel(
+                    x,
+                    y,
+                    Color(display_color.r, display_color.g, display_color.b, 1.0f)
+                );
+            }
+        }
+
+        return image;
+    }
+
+    // Tile debug 是诊断产物，保留 REQ-001 之前的线性 clamp 底图，
+    // 不受 Environment exposure、tone mapping 或 sRGB 编码影响。
+    Ref<Image> film_to_linear_clamped_debug_image(const godot_rt::Film& film,
+                                                  const Vector2i& image_size) {
         Ref<Image> image = Image::create_empty(image_size.x, image_size.y, false, Image::FORMAT_RGBA8);
         if (image.is_null()) {
             return image;
@@ -1139,6 +1207,7 @@ namespace {
 
         const auto prepare_settings_start = TimingClock::now();
         request.camera = make_render_camera(camera);
+        request.output_postprocess_settings = capture_output_postprocess_settings(camera);
         request.selection = selection;
         request.save_path = save_path;
         request.primary_hit_mask_path = primary_hit_mask_path;
@@ -1306,7 +1375,11 @@ namespace {
         }
 
         const auto film_to_image_start = TimingClock::now();
-        Ref<Image> image = film_to_image(tracer.get_film(), request.settings.image_size);
+        Ref<Image> image = film_to_image(
+            tracer.get_film(),
+            request.settings.image_size,
+            request.output_postprocess_settings
+        );
         add_timing(&timing_entries, "film_to_image", elapsed_ms(film_to_image_start));
         if (image.is_null()) {
             outcome.error = "Could not create output image.";
@@ -1355,8 +1428,12 @@ namespace {
 
         if (request.selection.mode == RenderMode::Tile) {
             const auto tile_debug_to_image_start = TimingClock::now();
+            Ref<Image> tile_debug_base = film_to_linear_clamped_debug_image(
+                tracer.get_film(),
+                request.settings.image_size
+            );
             Ref<Image> tile_debug_image = tile_debug_overlay_to_image(
-                image,
+                tile_debug_base,
                 request.settings.image_size,
                 request.selection.target_tile
             );

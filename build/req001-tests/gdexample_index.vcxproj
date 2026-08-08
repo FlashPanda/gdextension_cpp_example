@@ -1,0 +1,318 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <PreferredToolArchitecture>x64</PreferredToolArchitecture>
+  </PropertyGroup>
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="MinSizeRel|x64">
+      <Configuration>MinSizeRel</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="RelWithDebInfo|x64">
+      <Configuration>RelWithDebInfo</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{612DC0D6-4389-38B6-B7EB-865790F8A997}</ProjectGuid>
+    <Keyword>Win32Proj</Keyword>
+    <WindowsTargetPlatformVersion>10.0.26100.0</WindowsTargetPlatformVersion>
+    <Platform>x64</Platform>
+    <ProjectName>gdexample_index</ProjectName>
+    <VCProjectUpgraderObjectName>NoUpgrade</VCProjectUpgraderObjectName>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v143</PlatformToolset>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v143</PlatformToolset>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v143</PlatformToolset>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v143</PlatformToolset>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup>
+    <_ProjectFileVersion>10.0.20506.1</_ProjectFileVersion>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">D:\gdextension_cpp_example\build\req001-tests\Debug\</OutDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">gdexample_index.dir\Debug\</IntDir>
+    <TargetName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">gdexample_index</TargetName>
+    <TargetExt Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">.lib</TargetExt>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='Release|x64'">D:\gdextension_cpp_example\build\req001-tests\Release\</OutDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='Release|x64'">gdexample_index.dir\Release\</IntDir>
+    <TargetName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">gdexample_index</TargetName>
+    <TargetExt Condition="'$(Configuration)|$(Platform)'=='Release|x64'">.lib</TargetExt>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">D:\gdextension_cpp_example\build\req001-tests\MinSizeRel\</OutDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">gdexample_index.dir\MinSizeRel\</IntDir>
+    <TargetName Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">gdexample_index</TargetName>
+    <TargetExt Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">.lib</TargetExt>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">D:\gdextension_cpp_example\build\req001-tests\RelWithDebInfo\</OutDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">gdexample_index.dir\RelWithDebInfo\</IntDir>
+    <TargetName Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">gdexample_index</TargetName>
+    <TargetExt Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">.lib</TargetExt>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <AdditionalIncludeDirectories>D:\gdextension_cpp_example\src;D:\gdextension_cpp_example\godot-cpp\include;D:\gdextension_cpp_example\godot-cpp\gen\include;D:\gdextension_cpp_example\godot-cpp\gdextension;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
+      <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <ExceptionHandling>Sync</ExceptionHandling>
+      <InlineFunctionExpansion>Disabled</InlineFunctionExpansion>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <Optimization>Disabled</Optimization>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
+      <RuntimeTypeInfo>true</RuntimeTypeInfo>
+      <UseFullPaths>false</UseFullPaths>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;CMAKE_INTDIR="Debug"</PreprocessorDefinitions>
+      <ObjectFileName>$(IntDir)</ObjectFileName>
+    </ClCompile>
+    <ResourceCompile>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_DEBUG;_WINDOWS;CMAKE_INTDIR=\"Debug\"</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>D:\gdextension_cpp_example\src;D:\gdextension_cpp_example\godot-cpp\include;D:\gdextension_cpp_example\godot-cpp\gen\include;D:\gdextension_cpp_example\godot-cpp\gdextension;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+    <Midl>
+      <AdditionalIncludeDirectories>D:\gdextension_cpp_example\src;D:\gdextension_cpp_example\godot-cpp\include;D:\gdextension_cpp_example\godot-cpp\gen\include;D:\gdextension_cpp_example\godot-cpp\gdextension;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
+      <HeaderFileName>%(Filename).h</HeaderFileName>
+      <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
+      <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>%(Filename)_p.c</ProxyFileName>
+    </Midl>
+    <Lib>
+      <AdditionalOptions>%(AdditionalOptions) /machine:x64</AdditionalOptions>
+    </Lib>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <AdditionalIncludeDirectories>D:\gdextension_cpp_example\src;D:\gdextension_cpp_example\godot-cpp\include;D:\gdextension_cpp_example\godot-cpp\gen\include;D:\gdextension_cpp_example\godot-cpp\gdextension;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
+      <ExceptionHandling>Sync</ExceptionHandling>
+      <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <Optimization>MaxSpeed</Optimization>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <RuntimeTypeInfo>true</RuntimeTypeInfo>
+      <UseFullPaths>false</UseFullPaths>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;CMAKE_INTDIR="Release"</PreprocessorDefinitions>
+      <ObjectFileName>$(IntDir)</ObjectFileName>
+      <DebugInformationFormat>
+      </DebugInformationFormat>
+    </ClCompile>
+    <ResourceCompile>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;CMAKE_INTDIR=\"Release\"</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>D:\gdextension_cpp_example\src;D:\gdextension_cpp_example\godot-cpp\include;D:\gdextension_cpp_example\godot-cpp\gen\include;D:\gdextension_cpp_example\godot-cpp\gdextension;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+    <Midl>
+      <AdditionalIncludeDirectories>D:\gdextension_cpp_example\src;D:\gdextension_cpp_example\godot-cpp\include;D:\gdextension_cpp_example\godot-cpp\gen\include;D:\gdextension_cpp_example\godot-cpp\gdextension;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
+      <HeaderFileName>%(Filename).h</HeaderFileName>
+      <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
+      <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>%(Filename)_p.c</ProxyFileName>
+    </Midl>
+    <Lib>
+      <AdditionalOptions>%(AdditionalOptions) /machine:x64</AdditionalOptions>
+    </Lib>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">
+    <ClCompile>
+      <AdditionalIncludeDirectories>D:\gdextension_cpp_example\src;D:\gdextension_cpp_example\godot-cpp\include;D:\gdextension_cpp_example\godot-cpp\gen\include;D:\gdextension_cpp_example\godot-cpp\gdextension;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
+      <ExceptionHandling>Sync</ExceptionHandling>
+      <InlineFunctionExpansion>OnlyExplicitInline</InlineFunctionExpansion>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <Optimization>MinSpace</Optimization>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <RuntimeTypeInfo>true</RuntimeTypeInfo>
+      <UseFullPaths>false</UseFullPaths>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;CMAKE_INTDIR="MinSizeRel"</PreprocessorDefinitions>
+      <ObjectFileName>$(IntDir)</ObjectFileName>
+      <DebugInformationFormat>
+      </DebugInformationFormat>
+    </ClCompile>
+    <ResourceCompile>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;CMAKE_INTDIR=\"MinSizeRel\"</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>D:\gdextension_cpp_example\src;D:\gdextension_cpp_example\godot-cpp\include;D:\gdextension_cpp_example\godot-cpp\gen\include;D:\gdextension_cpp_example\godot-cpp\gdextension;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+    <Midl>
+      <AdditionalIncludeDirectories>D:\gdextension_cpp_example\src;D:\gdextension_cpp_example\godot-cpp\include;D:\gdextension_cpp_example\godot-cpp\gen\include;D:\gdextension_cpp_example\godot-cpp\gdextension;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
+      <HeaderFileName>%(Filename).h</HeaderFileName>
+      <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
+      <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>%(Filename)_p.c</ProxyFileName>
+    </Midl>
+    <Lib>
+      <AdditionalOptions>%(AdditionalOptions) /machine:x64</AdditionalOptions>
+    </Lib>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">
+    <ClCompile>
+      <AdditionalIncludeDirectories>D:\gdextension_cpp_example\src;D:\gdextension_cpp_example\godot-cpp\include;D:\gdextension_cpp_example\godot-cpp\gen\include;D:\gdextension_cpp_example\godot-cpp\gdextension;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <ExceptionHandling>Sync</ExceptionHandling>
+      <InlineFunctionExpansion>OnlyExplicitInline</InlineFunctionExpansion>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <Optimization>MaxSpeed</Optimization>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <RuntimeTypeInfo>true</RuntimeTypeInfo>
+      <UseFullPaths>false</UseFullPaths>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;CMAKE_INTDIR="RelWithDebInfo"</PreprocessorDefinitions>
+      <ObjectFileName>$(IntDir)</ObjectFileName>
+    </ClCompile>
+    <ResourceCompile>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;CMAKE_INTDIR=\"RelWithDebInfo\"</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>D:\gdextension_cpp_example\src;D:\gdextension_cpp_example\godot-cpp\include;D:\gdextension_cpp_example\godot-cpp\gen\include;D:\gdextension_cpp_example\godot-cpp\gdextension;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+    <Midl>
+      <AdditionalIncludeDirectories>D:\gdextension_cpp_example\src;D:\gdextension_cpp_example\godot-cpp\include;D:\gdextension_cpp_example\godot-cpp\gen\include;D:\gdextension_cpp_example\godot-cpp\gdextension;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
+      <HeaderFileName>%(Filename).h</HeaderFileName>
+      <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
+      <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>%(Filename)_p.c</ProxyFileName>
+    </Midl>
+    <Lib>
+      <AdditionalOptions>%(AdditionalOptions) /machine:x64</AdditionalOptions>
+    </Lib>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <CustomBuild Include="D:\gdextension_cpp_example\CMakeLists.txt">
+      <UseUtf8Encoding>Always</UseUtf8Encoding>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Building Custom Rule D:/gdextension_cpp_example/CMakeLists.txt</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">setlocal
+C:\Softwares\CMake\bin\cmake.exe -SD:/gdextension_cpp_example -BD:/gdextension_cpp_example/build/req001-tests --check-stamp-file D:/gdextension_cpp_example/build/req001-tests/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">C:\Softwares\CMake\share\cmake-3.26\Modules\CMakeCXXInformation.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\CMakeCommonLanguageInclude.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\CMakeGenericSystem.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\CMakeInitializeConfigs.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\CMakeLanguageInformation.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\CMakeRCInformation.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\CMakeSystemSpecificInformation.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\CMakeSystemSpecificInitialize.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\CTest.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\CTestTargets.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\CTestUseLaunchers.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\Compiler\CMakeCommonCompilerMacros.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\Compiler\MSVC-CXX.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\Compiler\MSVC.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\DartConfiguration.tcl.in;C:\Softwares\CMake\share\cmake-3.26\Modules\Platform\Windows-MSVC-CXX.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\Platform\Windows-MSVC.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\Platform\Windows.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\Platform\WindowsPaths.cmake;D:\gdextension_cpp_example\build\req001-tests\CMakeFiles\3.26.0-rc6\CMakeCXXCompiler.cmake;D:\gdextension_cpp_example\build\req001-tests\CMakeFiles\3.26.0-rc6\CMakeRCCompiler.cmake;D:\gdextension_cpp_example\build\req001-tests\CMakeFiles\3.26.0-rc6\CMakeSystem.cmake;D:\gdextension_cpp_example\build\req001-tests\CMakeFiles\cmake.verify_globs;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">D:\gdextension_cpp_example\build\req001-tests\CMakeFiles\generate.stamp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</LinkObjects>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Building Custom Rule D:/gdextension_cpp_example/CMakeLists.txt</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">setlocal
+C:\Softwares\CMake\bin\cmake.exe -SD:/gdextension_cpp_example -BD:/gdextension_cpp_example/build/req001-tests --check-stamp-file D:/gdextension_cpp_example/build/req001-tests/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\Softwares\CMake\share\cmake-3.26\Modules\CMakeCXXInformation.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\CMakeCommonLanguageInclude.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\CMakeGenericSystem.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\CMakeInitializeConfigs.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\CMakeLanguageInformation.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\CMakeRCInformation.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\CMakeSystemSpecificInformation.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\CMakeSystemSpecificInitialize.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\CTest.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\CTestTargets.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\CTestUseLaunchers.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\Compiler\CMakeCommonCompilerMacros.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\Compiler\MSVC-CXX.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\Compiler\MSVC.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\DartConfiguration.tcl.in;C:\Softwares\CMake\share\cmake-3.26\Modules\Platform\Windows-MSVC-CXX.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\Platform\Windows-MSVC.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\Platform\Windows.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\Platform\WindowsPaths.cmake;D:\gdextension_cpp_example\build\req001-tests\CMakeFiles\3.26.0-rc6\CMakeCXXCompiler.cmake;D:\gdextension_cpp_example\build\req001-tests\CMakeFiles\3.26.0-rc6\CMakeRCCompiler.cmake;D:\gdextension_cpp_example\build\req001-tests\CMakeFiles\3.26.0-rc6\CMakeSystem.cmake;D:\gdextension_cpp_example\build\req001-tests\CMakeFiles\cmake.verify_globs;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">D:\gdextension_cpp_example\build\req001-tests\CMakeFiles\generate.stamp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkObjects>
+      <Message Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">Building Custom Rule D:/gdextension_cpp_example/CMakeLists.txt</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">setlocal
+C:\Softwares\CMake\bin\cmake.exe -SD:/gdextension_cpp_example -BD:/gdextension_cpp_example/build/req001-tests --check-stamp-file D:/gdextension_cpp_example/build/req001-tests/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">C:\Softwares\CMake\share\cmake-3.26\Modules\CMakeCXXInformation.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\CMakeCommonLanguageInclude.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\CMakeGenericSystem.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\CMakeInitializeConfigs.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\CMakeLanguageInformation.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\CMakeRCInformation.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\CMakeSystemSpecificInformation.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\CMakeSystemSpecificInitialize.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\CTest.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\CTestTargets.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\CTestUseLaunchers.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\Compiler\CMakeCommonCompilerMacros.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\Compiler\MSVC-CXX.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\Compiler\MSVC.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\DartConfiguration.tcl.in;C:\Softwares\CMake\share\cmake-3.26\Modules\Platform\Windows-MSVC-CXX.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\Platform\Windows-MSVC.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\Platform\Windows.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\Platform\WindowsPaths.cmake;D:\gdextension_cpp_example\build\req001-tests\CMakeFiles\3.26.0-rc6\CMakeCXXCompiler.cmake;D:\gdextension_cpp_example\build\req001-tests\CMakeFiles\3.26.0-rc6\CMakeRCCompiler.cmake;D:\gdextension_cpp_example\build\req001-tests\CMakeFiles\3.26.0-rc6\CMakeSystem.cmake;D:\gdextension_cpp_example\build\req001-tests\CMakeFiles\cmake.verify_globs;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">D:\gdextension_cpp_example\build\req001-tests\CMakeFiles\generate.stamp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">false</LinkObjects>
+      <Message Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">Building Custom Rule D:/gdextension_cpp_example/CMakeLists.txt</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">setlocal
+C:\Softwares\CMake\bin\cmake.exe -SD:/gdextension_cpp_example -BD:/gdextension_cpp_example/build/req001-tests --check-stamp-file D:/gdextension_cpp_example/build/req001-tests/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">C:\Softwares\CMake\share\cmake-3.26\Modules\CMakeCXXInformation.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\CMakeCommonLanguageInclude.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\CMakeGenericSystem.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\CMakeInitializeConfigs.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\CMakeLanguageInformation.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\CMakeRCInformation.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\CMakeSystemSpecificInformation.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\CMakeSystemSpecificInitialize.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\CTest.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\CTestTargets.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\CTestUseLaunchers.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\Compiler\CMakeCommonCompilerMacros.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\Compiler\MSVC-CXX.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\Compiler\MSVC.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\DartConfiguration.tcl.in;C:\Softwares\CMake\share\cmake-3.26\Modules\Platform\Windows-MSVC-CXX.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\Platform\Windows-MSVC.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\Platform\Windows.cmake;C:\Softwares\CMake\share\cmake-3.26\Modules\Platform\WindowsPaths.cmake;D:\gdextension_cpp_example\build\req001-tests\CMakeFiles\3.26.0-rc6\CMakeCXXCompiler.cmake;D:\gdextension_cpp_example\build\req001-tests\CMakeFiles\3.26.0-rc6\CMakeRCCompiler.cmake;D:\gdextension_cpp_example\build\req001-tests\CMakeFiles\3.26.0-rc6\CMakeSystem.cmake;D:\gdextension_cpp_example\build\req001-tests\CMakeFiles\cmake.verify_globs;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">D:\gdextension_cpp_example\build\req001-tests\CMakeFiles\generate.stamp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">false</LinkObjects>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="D:\gdextension_cpp_example\src\accel\accel_interface.h" />
+    <ClCompile Include="D:\gdextension_cpp_example\src\accel\brute_force_accel.cpp" />
+    <ClInclude Include="D:\gdextension_cpp_example\src\accel\brute_force_accel.h" />
+    <ClCompile Include="D:\gdextension_cpp_example\src\core\ray.cpp" />
+    <ClInclude Include="D:\gdextension_cpp_example\src\core\ray.h" />
+    <ClInclude Include="D:\gdextension_cpp_example\src\core\rt_color.h" />
+    <ClCompile Include="D:\gdextension_cpp_example\src\core\rt_light.cpp" />
+    <ClInclude Include="D:\gdextension_cpp_example\src\core\rt_light.h" />
+    <ClInclude Include="D:\gdextension_cpp_example\src\core\rt_math.h" />
+    <ClInclude Include="D:\gdextension_cpp_example\src\core\rt_random.h" />
+    <ClInclude Include="D:\gdextension_cpp_example\src\core\rt_types.h" />
+    <ClCompile Include="D:\gdextension_cpp_example\src\raytrace_exporter.cpp" />
+    <ClInclude Include="D:\gdextension_cpp_example\src\raytrace_exporter.h" />
+    <ClCompile Include="D:\gdextension_cpp_example\src\register_types.cpp">
+      <ObjectFileName>$(IntDir)/src/register_types.cpp.obj</ObjectFileName>
+    </ClCompile>
+    <ClInclude Include="D:\gdextension_cpp_example\src\register_types.h" />
+    <ClInclude Include="D:\gdextension_cpp_example\src\render\bsdf\BrdfCommon.h" />
+    <ClInclude Include="D:\gdextension_cpp_example\src\render\bsdf\Bsdf.h" />
+    <ClInclude Include="D:\gdextension_cpp_example\src\render\bsdf\GodotStandardBrdf.h" />
+    <ClCompile Include="D:\gdextension_cpp_example\src\render\color_postprocess.cpp" />
+    <ClInclude Include="D:\gdextension_cpp_example\src\render\color_postprocess.h" />
+    <ClCompile Include="D:\gdextension_cpp_example\src\render\cpu_path_tracer.cpp" />
+    <ClInclude Include="D:\gdextension_cpp_example\src\render\cpu_path_tracer.h" />
+    <ClCompile Include="D:\gdextension_cpp_example\src\render\film.cpp" />
+    <ClInclude Include="D:\gdextension_cpp_example\src\render\film.h" />
+    <ClCompile Include="D:\gdextension_cpp_example\src\render\frame_accumulator.cpp" />
+    <ClInclude Include="D:\gdextension_cpp_example\src\render\frame_accumulator.h" />
+    <ClCompile Include="D:\gdextension_cpp_example\src\render\integrators.cpp" />
+    <ClInclude Include="D:\gdextension_cpp_example\src\render\integrators.h" />
+    <ClInclude Include="D:\gdextension_cpp_example\src\scene\rt_scene.h" />
+    <ClCompile Include="D:\gdextension_cpp_example\src\scene\scene_extractor.cpp" />
+    <ClInclude Include="D:\gdextension_cpp_example\src\scene\scene_extractor.h" />
+    <ClCompile Include="D:\gdextension_cpp_example\src\util\logger.cpp" />
+    <ClInclude Include="D:\gdextension_cpp_example\src\util\logger.h" />
+    <ClCompile Include="D:\gdextension_cpp_example\godot-cpp\test\src\register_types.cpp">
+      <ObjectFileName>$(IntDir)/godot-cpp/test/src/register_types.cpp.obj</ObjectFileName>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="D:\gdextension_cpp_example\build\req001-tests\ZERO_CHECK.vcxproj">
+      <Project>{200AD3B1-9CF7-3E39-8147-AD9FC5B4E59A}</Project>
+      <Name>ZERO_CHECK</Name>
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </ProjectReference>
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
+</Project>
