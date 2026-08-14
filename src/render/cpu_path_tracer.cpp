@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <utility>
 
 namespace godot_rt {
 namespace {
@@ -63,6 +64,13 @@ void CpuPathTracer::set_accel(std::unique_ptr<AccelInterface> new_accel) {
     rebuild_integrator();
 }
 
+void CpuPathTracer::set_log_sink(TraceLogSink new_log_sink) {
+    log_sink = std::move(new_log_sink);
+    if (integrator) {
+        integrator->set_log_sink(log_sink);
+    }
+}
+
 bool CpuPathTracer::render_next_tile(Tile* out_tile) {
     Tile tile;
     if (!frame_accumulator.next_tile(&tile)) {
@@ -82,14 +90,18 @@ void CpuPathTracer::render_tile(const Tile& tile) {
     const int x_end = std::min(tile.origin.x + tile.size.x, settings.image_size.x);
     const int y_end = std::min(tile.origin.y + tile.size.y, settings.image_size.y);
 
+    // 并行调用必须覆盖互不重叠的像素，使 Film 和命中/未命中计数始终由当前 tile 线程独占写入。
+    // 统计先在 tile 局部累计，完成后只加锁归并一次，避免在每条光线热路径上争用全局锁。
+    RenderStatistics tile_statistics;
     for (int y = y_begin; y < y_end; ++y) {
         for (int x = x_begin; x < x_end; ++x) {
             const godot::Vector2i pixel(x, y);
             for (int sample_index = 0; sample_index < settings.samples_per_pixel; ++sample_index) {
-                render_sample(pixel, tile.pass_index, sample_index);
+                render_sample(pixel, tile.pass_index, sample_index, &tile_statistics);
             }
         }
     }
+    merge_statistics(tile_statistics);
 }
 
 bool CpuPathTracer::render_pixel(godot::Vector2i pixel, int pass_index, int sample_index) {
@@ -97,7 +109,9 @@ bool CpuPathTracer::render_pixel(godot::Vector2i pixel, int pass_index, int samp
         return false;
     }
 
-    render_sample(pixel, std::max(pass_index, 0), std::max(sample_index, 0));
+    RenderStatistics pixel_statistics;
+    render_sample(pixel, std::max(pass_index, 0), std::max(sample_index, 0), &pixel_statistics);
+    merge_statistics(pixel_statistics);
     return true;
 }
 
@@ -150,17 +164,30 @@ int CpuPathTracer::get_primary_miss_sample_count(godot::Vector2i pixel) const {
 }
 
 void CpuPathTracer::rebuild_integrator() {
-    integrator = Integrator::create("random_walk", &scene, accel.get(), settings.max_depth, &render_statistics);
+    integrator = Integrator::create("random_walk", &scene, accel.get(), settings.max_depth);
+    if (integrator) {
+        integrator->set_log_sink(log_sink);
+    }
 }
 
-TraceResult CpuPathTracer::trace_sample(const RayDifferential& ray, Rng& rng) const {
+TraceResult CpuPathTracer::trace_sample(
+    const RayDifferential& ray,
+    Rng& rng,
+    RenderStatistics* statistics
+) const {
     if (!integrator) {
         TraceResult result;
         result.radiance = black();
         return result;
     }
 
-    return integrator->trace(ray, rng);
+    return integrator->trace(ray, rng, statistics);
+}
+
+void CpuPathTracer::merge_statistics(const RenderStatistics& statistics) {
+    // 这里只同步跨 tile 共享的总统计；Film 和逐像素计数依靠像素独占约束，无需全局锁。
+    std::lock_guard<std::mutex> lock(render_statistics_mutex);
+    merge_render_statistics(&render_statistics, statistics);
 }
 
 void CpuPathTracer::record_primary_hit(godot::Vector2i pixel, bool hit) {
@@ -185,7 +212,12 @@ std::size_t CpuPathTracer::pixel_index(godot::Vector2i pixel) const {
            static_cast<std::size_t>(pixel.x);
 }
 
-void CpuPathTracer::render_sample(godot::Vector2i pixel, int pass_index, int sample_index) {
+void CpuPathTracer::render_sample(
+    godot::Vector2i pixel,
+    int pass_index,
+    int sample_index,
+    RenderStatistics* statistics
+) {
     Rng rng(sample_seed(pixel, pass_index, sample_index, settings.seed));
     const godot::Vector2 jitter = rng.next_2d();
     const godot::Vector2 pixel_sample(
@@ -194,7 +226,7 @@ void CpuPathTracer::render_sample(godot::Vector2i pixel, int pass_index, int sam
     );
 
     const RayDifferential ray = camera.generate_primary_ray_differential(pixel_sample, settings.image_size);
-    const TraceResult result = trace_sample(ray, rng);
+    const TraceResult result = trace_sample(ray, rng, statistics);
     if (result.primary_ray_tested) {
         record_primary_hit(pixel, result.primary_ray_hit);
     }

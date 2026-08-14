@@ -1,7 +1,7 @@
 #ifndef GDEXTENSION_CPP_EXAMPLE_INTEGRATORS_H
 #define GDEXTENSION_CPP_EXAMPLE_INTEGRATORS_H
 
-#include <cstdint>
+#include <functional>
 #include <memory>
 
 #include <godot_cpp/core/math_defs.hpp>
@@ -13,17 +13,13 @@
 #include "../core/rt_random.h"
 #include "../core/rt_types.h"
 #include "../scene/rt_scene.h"
+#include "render_statistics.h"
 
 namespace godot_rt {
 
-    class AccelInterface;
+    using TraceLogSink = std::function<void(const godot::String&)>;
 
-    struct RenderStatistics {
-        double intersection_ms = 0.0;
-        std::int64_t primary_ray_count = 0;
-        std::int64_t primary_ray_hit_count = 0;
-        std::int64_t primary_ray_miss_count = 0;
-    };
+    class AccelInterface;
 
     struct TraceResult {
         godot::Color radiance = godot::Color(0.0f, 0.0f, 0.0f, 1.0f);
@@ -39,28 +35,45 @@ namespace godot_rt {
             const godot::String& name,
             const Scene* scene,
             AccelInterface* accel,
-            int max_depth,
-            RenderStatistics* statistics = nullptr
+            int max_depth
         );
 
         virtual godot::String to_string() const = 0;
-        virtual TraceResult trace(const RayDifferential& ray, Rng& rng) const = 0;
+        // `statistics` 必须指向只属于当前调用线程的局部统计对象；integrator 不保留该指针。
+        virtual TraceResult trace(
+            const RayDifferential& ray,
+            Rng& rng,
+            RenderStatistics* statistics = nullptr
+        ) const = 0;
 
-        bool intersect(const Ray& ray, Hit* hit, real_t t_max = Math_INF) const;
-        bool intersect_p(const Ray& ray, real_t t_max = Math_INF) const;
-        bool unoccluded(const Hit& p0, const Hit& p1) const;
+        bool intersect(
+            const Ray& ray,
+            Hit* hit,
+            real_t t_max = Math_INF,
+            RenderStatistics* statistics = nullptr
+        ) const;
+        bool intersect_p(
+            const Ray& ray,
+            real_t t_max = Math_INF,
+            RenderStatistics* statistics = nullptr
+        ) const;
+        bool unoccluded(const Hit& p0, const Hit& p1, RenderStatistics* statistics = nullptr) const;
 
         void set_scene(const Scene* new_scene);
         void set_accel(AccelInterface* new_accel);
         void set_max_depth(int new_max_depth);
+        void set_log_sink(TraceLogSink new_log_sink);
 
     protected:
-        Integrator(const Scene* scene, AccelInterface* accel, int max_depth, RenderStatistics* statistics);
+        Integrator(const Scene* scene, AccelInterface* accel, int max_depth);
+
+        bool has_log_sink() const noexcept;
+        void log_info(const godot::String& message) const;
 
         const Scene* scene = nullptr;
         AccelInterface* aggregate = nullptr;
-        RenderStatistics* statistics = nullptr;
         int max_depth = 0;
+        TraceLogSink log_sink;
     };
 
     class RandomWalkIntegrator final : public Integrator {
@@ -68,19 +81,21 @@ namespace godot_rt {
         RandomWalkIntegrator(
             const Scene* scene,
             AccelInterface* accel,
-            int max_depth,
-            RenderStatistics* statistics = nullptr
+            int max_depth
         );
 
         static std::unique_ptr<RandomWalkIntegrator> create(
             const Scene* scene,
             AccelInterface* accel,
-            int max_depth,
-            RenderStatistics* statistics = nullptr
+            int max_depth
         );
 
         godot::String to_string() const final;
-        TraceResult trace(const RayDifferential& ray, Rng& rng) const final;
+        TraceResult trace(
+            const RayDifferential& ray,
+            Rng& rng,
+            RenderStatistics* statistics = nullptr
+        ) const final;
     };
 
 }

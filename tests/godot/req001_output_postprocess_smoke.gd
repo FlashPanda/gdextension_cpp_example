@@ -163,7 +163,7 @@ func _create_lit_scene() -> void:
 
 
 func _render_mean(label: String) -> float:
-    var output_path := "user://req001_output_postprocess_smoke/%s.png" % label
+    var output_path := "res://req001_output_postprocess_smoke/%s.png" % label
     var options := {
         "output_path": output_path,
         "samples_per_pixel": SAMPLE_COUNT,
@@ -203,7 +203,7 @@ func _render_mean(label: String) -> float:
 
 
 func _render_tile_debug_mean(label: String) -> float:
-    var output_path := "user://req001_output_postprocess_smoke/%s.png" % label
+    var output_path := "res://req001_output_postprocess_smoke/%s.png" % label
     var options := {
         "output_path": output_path,
         "samples_per_pixel": SAMPLE_COUNT,

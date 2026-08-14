@@ -3,10 +3,10 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <utility>
 #include <vector>
 
 #include "../accel/accel_interface.h"
-#include "../util/logger.h"
 #include "bsdf/GodotStandardBrdf.h"
 
 namespace godot_rt {
@@ -65,40 +65,49 @@ std::unique_ptr<Integrator> Integrator::create(
     const godot::String& name,
     const Scene* scene,
     AccelInterface* accel,
-    int max_depth,
-    RenderStatistics* statistics
+    int max_depth
 ) {
     (void)name;
-    return RandomWalkIntegrator::create(scene, accel, max_depth, statistics);
+    return RandomWalkIntegrator::create(scene, accel, max_depth);
 }
 
-bool Integrator::intersect(const Ray& ray, Hit* hit, real_t t_max) const {
+bool Integrator::intersect(
+    const Ray& ray,
+    Hit* hit,
+    real_t t_max,
+    RenderStatistics* trace_statistics
+) const {
     if (aggregate == nullptr) {
         return false;
     }
 
+    // `trace_statistics` 为调用方独占的局部对象，因此热路径可以直接累计而不使用原子或互斥锁。
     const auto intersect_start = TimingClock::now();
     const bool result = aggregate->intersect(ray, hit, t_max);
-    if (statistics != nullptr) {
-        statistics->intersection_ms += elapsed_ms(intersect_start);
+    if (trace_statistics != nullptr) {
+        trace_statistics->intersection_ms += elapsed_ms(intersect_start);
     }
     return result;
 }
 
-bool Integrator::intersect_p(const Ray& ray, real_t t_max) const {
+bool Integrator::intersect_p(
+    const Ray& ray,
+    real_t t_max,
+    RenderStatistics* trace_statistics
+) const {
     if (aggregate == nullptr) {
         return false;
     }
 
     const auto intersect_start = TimingClock::now();
     const bool result = aggregate->intersect_p(ray, t_max);
-    if (statistics != nullptr) {
-        statistics->intersection_ms += elapsed_ms(intersect_start);
+    if (trace_statistics != nullptr) {
+        trace_statistics->intersection_ms += elapsed_ms(intersect_start);
     }
     return result;
 }
 
-bool Integrator::unoccluded(const Hit& p0, const Hit& p1) const {
+bool Integrator::unoccluded(const Hit& p0, const Hit& p1, RenderStatistics* trace_statistics) const {
     godot::Vector3 direction = p1.position - p0.position;
     const real_t distance = direction.length();
     if (distance <= RAY_EPSILON) {
@@ -107,7 +116,7 @@ bool Integrator::unoccluded(const Hit& p0, const Hit& p1) const {
 
     direction /= distance;
     const Ray shadow_ray(p0.position + direction * RAY_EPSILON, direction);
-    return !intersect_p(shadow_ray, distance - RAY_EPSILON);
+    return !intersect_p(shadow_ray, distance - RAY_EPSILON, trace_statistics);
 }
 
 void Integrator::set_scene(const Scene* new_scene) {
@@ -122,38 +131,52 @@ void Integrator::set_max_depth(int new_max_depth) {
     max_depth = std::max(new_max_depth, 0);
 }
 
+void Integrator::set_log_sink(TraceLogSink new_log_sink) {
+    log_sink = std::move(new_log_sink);
+}
+
+bool Integrator::has_log_sink() const noexcept {
+    return static_cast<bool>(log_sink);
+}
+
+void Integrator::log_info(const godot::String& message) const {
+    if (log_sink) {
+        log_sink(message);
+    }
+}
+
 Integrator::Integrator(
     const Scene* new_scene,
     AccelInterface* accel,
-    int new_max_depth,
-    RenderStatistics* new_statistics
+    int new_max_depth
 )
     : scene(new_scene),
       aggregate(accel),
-      statistics(new_statistics),
       max_depth(std::max(new_max_depth, 0)) {}
 
 RandomWalkIntegrator::RandomWalkIntegrator(
     const Scene* scene,
     AccelInterface* accel,
-    int max_depth,
-    RenderStatistics* statistics
-) : Integrator(scene, accel, max_depth, statistics) {}
+    int max_depth
+) : Integrator(scene, accel, max_depth) {}
 
 std::unique_ptr<RandomWalkIntegrator> RandomWalkIntegrator::create(
     const Scene* scene,
     AccelInterface* accel,
-    int max_depth,
-    RenderStatistics* statistics
+    int max_depth
 ) {
-    return std::make_unique<RandomWalkIntegrator>(scene, accel, max_depth, statistics);
+    return std::make_unique<RandomWalkIntegrator>(scene, accel, max_depth);
 }
 
 godot::String RandomWalkIntegrator::to_string() const {
     return "RandomWalkIntegrator";
 }
 
-TraceResult RandomWalkIntegrator::trace(const RayDifferential& ray, Rng& rng) const {
+TraceResult RandomWalkIntegrator::trace(
+    const RayDifferential& ray,
+    Rng& rng,
+    RenderStatistics* trace_statistics
+) const {
     TraceResult result;
     if (scene == nullptr || aggregate == nullptr) {
         return result;
@@ -164,29 +187,34 @@ TraceResult RandomWalkIntegrator::trace(const RayDifferential& ray, Rng& rng) co
     RayDifferential current_ray = ray;
 
     for (int depth = 0; depth < max_depth; ++depth) {
-        Logger::info(
-            godot::String("current ray: ") +
-            godot::String(current_ray.to_string().c_str()) +
-            godot::String(", depth = ") +
-            godot::String::num_int64(depth)
-        );
+        if (has_log_sink()) {
+            log_info(
+                godot::String("current ray: ") +
+                godot::String(current_ray.to_string().c_str()) +
+                godot::String(", depth = ") +
+                godot::String::num_int64(depth)
+            );
+        }
 
         Hit hit;
-        const bool ray_hit = intersect(current_ray, &hit);
+        const bool ray_hit = intersect(current_ray, &hit, Math_INF, trace_statistics);
         if (depth == 0) {
             result.primary_ray_tested = true;
             result.primary_ray_hit = ray_hit;
         }
-        if (depth == 0 && statistics != nullptr) {
-            ++statistics->primary_ray_count;
+        // 主射线计数只在 depth 0 更新，保证一次样本恰好记录一次命中或未命中。
+        if (depth == 0 && trace_statistics != nullptr) {
+            ++trace_statistics->primary_ray_count;
             if (ray_hit) {
-                ++statistics->primary_ray_hit_count;
+                ++trace_statistics->primary_ray_hit_count;
             } else {
-                ++statistics->primary_ray_miss_count;
+                ++trace_statistics->primary_ray_miss_count;
             }
         }
         if (!ray_hit) {
-            Logger::info(godot::String("!ray_hit"));
+            if (has_log_sink()) {
+                log_info(godot::String("!ray_hit"));
+            }
             break;
         }
 
@@ -198,7 +226,9 @@ TraceResult RandomWalkIntegrator::trace(const RayDifferential& ray, Rng& rng) co
 
         godot::Vector3 normal = hit.normal;
         if (normal.length_squared() == 0.0f) {
-            Logger::info(godot::String("!normal.length_squared() == 0.0f"));
+            if (has_log_sink()) {
+                log_info(godot::String("!normal.length_squared() == 0.0f"));
+            }
             break;
         }
         normal.normalize();
@@ -210,12 +240,16 @@ TraceResult RandomWalkIntegrator::trace(const RayDifferential& ray, Rng& rng) co
 
         godot::Vector3 wo = -current_ray.d;
         if (wo.length_squared() == 0.0f) {
-            Logger::info(godot::String("wo.length_squared() == 0.0f"));
+            if (has_log_sink()) {
+                log_info(godot::String("wo.length_squared() == 0.0f"));
+            }
             break;
         }
         wo.normalize();
         if (normal.dot(wo) <= 0.0f) {
-            Logger::info(godot::String("normal.dot(wo) <= 0.0f"));
+            if (has_log_sink()) {
+                log_info(godot::String("normal.dot(wo) <= 0.0f"));
+            }
             break;
         }
 
@@ -225,13 +259,17 @@ TraceResult RandomWalkIntegrator::trace(const RayDifferential& ray, Rng& rng) co
         for (const Light& light : scene->get_lights()) {
             const LightSample light_sample = light.sample_li(hit.position);
             if (!light_sample.valid) {
-                Logger::info(godot::String("!light_sample.valid"));
+                if (has_log_sink()) {
+                    log_info(godot::String("!light_sample.valid"));
+                }
                 continue;
             }
 
             const real_t cos_theta = normal.dot(light_sample.wi);
             if (cos_theta <= 0.0) {
-                Logger::info(godot::String("cos_theta <= 0.0"));
+                if (has_log_sink()) {
+                    log_info(godot::String("cos_theta <= 0.0"));
+                }
                 continue;
             }
 
@@ -242,37 +280,41 @@ TraceResult RandomWalkIntegrator::trace(const RayDifferential& ray, Rng& rng) co
                 }
 
                 const Ray shadow_ray(hit.position + normal * RAY_EPSILON, light_sample.wi);
-                if (intersect_p(shadow_ray, shadow_t_max)) {
+                if (intersect_p(shadow_ray, shadow_t_max, trace_statistics)) {
                     continue;
                 }
             }
 
             const godot::Color f = bsdf.eval(wo, light_sample.wi);
             if (brdf::is_black(f)) {
-                Logger::info(godot::String("brdf::is_black(f)"));
+                if (has_log_sink()) {
+                    log_info(godot::String("brdf::is_black(f)"));
+                }
                 continue;
             }
 
-            Logger::info(
-                godot::String("add_direct_lighting: radiance=(") +
-                godot::String::num(radiance.r, 6) + ", " +
-                godot::String::num(radiance.g, 6) + ", " +
-                godot::String::num(radiance.b, 6) + ", " +
-                godot::String::num(radiance.a, 6) + "), throughput=(" +
-                godot::String::num(throughput.r, 6) + ", " +
-                godot::String::num(throughput.g, 6) + ", " +
-                godot::String::num(throughput.b, 6) + ", " +
-                godot::String::num(throughput.a, 6) + "), f=(" +
-                godot::String::num(f.r, 6) + ", " +
-                godot::String::num(f.g, 6) + ", " +
-                godot::String::num(f.b, 6) + ", " +
-                godot::String::num(f.a, 6) + "), light_sample.radiance=(" +
-                godot::String::num(light_sample.radiance.r, 6) + ", " +
-                godot::String::num(light_sample.radiance.g, 6) + ", " +
-                godot::String::num(light_sample.radiance.b, 6) + ", " +
-                godot::String::num(light_sample.radiance.a, 6) + "), cos_theta=" +
-                godot::String::num(static_cast<double>(cos_theta), 6)
-            );
+            if (has_log_sink()) {
+                log_info(
+                    godot::String("add_direct_lighting: radiance=(") +
+                    godot::String::num(radiance.r, 6) + ", " +
+                    godot::String::num(radiance.g, 6) + ", " +
+                    godot::String::num(radiance.b, 6) + ", " +
+                    godot::String::num(radiance.a, 6) + "), throughput=(" +
+                    godot::String::num(throughput.r, 6) + ", " +
+                    godot::String::num(throughput.g, 6) + ", " +
+                    godot::String::num(throughput.b, 6) + ", " +
+                    godot::String::num(throughput.a, 6) + "), f=(" +
+                    godot::String::num(f.r, 6) + ", " +
+                    godot::String::num(f.g, 6) + ", " +
+                    godot::String::num(f.b, 6) + ", " +
+                    godot::String::num(f.a, 6) + "), light_sample.radiance=(" +
+                    godot::String::num(light_sample.radiance.r, 6) + ", " +
+                    godot::String::num(light_sample.radiance.g, 6) + ", " +
+                    godot::String::num(light_sample.radiance.b, 6) + ", " +
+                    godot::String::num(light_sample.radiance.a, 6) + "), cos_theta=" +
+                    godot::String::num(static_cast<double>(cos_theta), 6)
+                );
+            }
             add_direct_lighting(radiance, throughput, f, light_sample.radiance, cos_theta);
         }
 
@@ -288,7 +330,9 @@ TraceResult RandomWalkIntegrator::trace(const RayDifferential& ray, Rng& rng) co
             static_cast<float>(sample_cos_theta) / bsdf_sample.pdf
         );
         if (brdf::max_rgb(throughput) <= 0.0f) {
-            Logger::info(godot::String("brdf::max_rgb(throughput) <= 0.0f"));
+            if (has_log_sink()) {
+                log_info(godot::String("brdf::max_rgb(throughput) <= 0.0f"));
+            }
             break;
         }
 
@@ -298,13 +342,15 @@ TraceResult RandomWalkIntegrator::trace(const RayDifferential& ray, Rng& rng) co
     radiance.a = 1.0f;
     result.radiance = radiance;
 
-    Logger::info(
-        godot::String("final radiance=(") +
-        godot::String::num(result.radiance.r, 6) + ", " +
-        godot::String::num(result.radiance.g, 6) + ", " +
-        godot::String::num(result.radiance.b, 6) + ", " +
-        godot::String::num(result.radiance.a, 6) + ")"
-    );
+    if (has_log_sink()) {
+        log_info(
+            godot::String("final radiance=(") +
+            godot::String::num(result.radiance.r, 6) + ", " +
+            godot::String::num(result.radiance.g, 6) + ", " +
+            godot::String::num(result.radiance.b, 6) + ", " +
+            godot::String::num(result.radiance.a, 6) + ")"
+        );
+    }
     return result;
 }
 

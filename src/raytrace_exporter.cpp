@@ -28,7 +28,10 @@
 #include "render/cpu_path_tracer.h"
 #include "render/film.h"
 #include "render/frame_accumulator.h"
+#include "render/parallel_task_scheduler.h"
+#include "render/render_execution_policy.h"
 #include "scene/scene_extractor.h"
+#include "util/logger.h"
 
 using namespace godot;
 
@@ -97,6 +100,7 @@ namespace {
         String timing_log_path;
         TimingClock::time_point total_start;
         std::vector<TimingEntry> timing_entries;
+        std::thread::id submission_thread_id;
     };
 
     // RenderOutcome 记录渲染结束或提前失败后的结果。
@@ -125,6 +129,14 @@ namespace {
         std::vector<TimingEntry> timing_entries;
     };
 
+    // 工作线程只填充纯计算结果；Film 由 tracer 持有，等待提交线程完成图像与文件导出。
+    struct RenderComputation {
+        RenderOutcome outcome;
+        std::unique_ptr<godot_rt::CpuPathTracer> tracer;
+        std::vector<String> deferred_logs;
+        bool render_completed = false;
+    };
+
     // RenderJob 保存一个后台渲染任务的跨调用状态。
     // 原子字段用于 worker 与 Godot 主线程之间的轻量通信；outcome 由 result_mutex 保护，
     // 因为完成状态、轮询和释放可能从不同的 Godot 调用路径访问它。
@@ -134,11 +146,13 @@ namespace {
         std::thread worker;
         std::atomic_bool worker_can_start{false};
         std::atomic_bool cancel_requested{false};
+        std::atomic_bool compute_done{false};
         std::atomic_bool done{false};
         std::atomic_int tiles_done{0};
         int total_tiles = 0;
         std::mutex result_mutex;
         RenderOutcome outcome;
+        std::unique_ptr<RenderComputation> computation;
     };
 
     // 全局任务表保存仍可被 poll/cancel/release 访问的后台任务。
@@ -1213,6 +1227,7 @@ namespace {
         request.primary_hit_mask_path = primary_hit_mask_path;
         request.timing_log_path = timing_log_path;
         request.total_start = total_start;
+        request.submission_thread_id = std::this_thread::get_id();
         request.settings.image_size = image_size;
         request.settings.tile_size = Vector2i(TILE_SIZE, TILE_SIZE);
         request.settings.samples_per_pixel = selection.mode == RenderMode::Pixel ? 1 : normalized_spp;
@@ -1227,23 +1242,49 @@ namespace {
         return true;
     }
 
-    // 以固定 TILE_SIZE 扫描整张图并逐块渲染。
-    // 取消检查放在每个 tile 前，让后台渲染可以在较短时间内响应 cancel_render_job。
+    // 将完整图像拆成互不重叠的 tile 并行渲染。调用线程计入计算线程总数；
+    // 对异步任务而言，它就是现有 job worker，因此不会在外层 worker 之外再多算一整组线程。
+    unsigned int render_compute_thread_count(const RenderRequest& request) {
+        if (request.selection.mode != RenderMode::Full) {
+            return 1;
+        }
+
+        const int task_count = total_tile_count(request.settings.image_size);
+        return static_cast<unsigned int>(std::min(
+            std::max(task_count, 0),
+            static_cast<int>(godot_rt::recommended_render_thread_count())
+        ));
+    }
+
     bool render_one_pass(godot_rt::CpuPathTracer& tracer,
                          const Vector2i& image_size,
+                         unsigned int compute_thread_count,
                          const std::atomic_bool* cancel_requested,
                          std::atomic_int* tiles_done) {
-        for (int y = 0; y < image_size.y; y += TILE_SIZE) {
-            for (int x = 0; x < image_size.x; x += TILE_SIZE) {
-                if (cancel_requested != nullptr && cancel_requested->load(std::memory_order_relaxed)) {
-                    return false;
-                }
+        const int tile_columns = ceil_div(std::max(image_size.x, 0), TILE_SIZE);
+        const int tile_rows = ceil_div(std::max(image_size.y, 0), TILE_SIZE);
+        const std::size_t tile_count = static_cast<std::size_t>(tile_columns) *
+                                       static_cast<std::size_t>(tile_rows);
+
+        const godot_rt::CancellationCheck cancellation_check = cancel_requested == nullptr
+            ? godot_rt::CancellationCheck()
+            : godot_rt::CancellationCheck([cancel_requested]() {
+                  return cancel_requested->load(std::memory_order_relaxed);
+              });
+
+        const godot_rt::ParallelTaskResult result = godot_rt::run_parallel_tasks(
+            tile_count,
+            compute_thread_count,
+            [&](std::size_t tile_index) {
+                // 线性任务索引与二维 tile 坐标一一对应，唯一领取即可保证不同线程不会写同一像素。
+                const int tile_x = static_cast<int>(tile_index % static_cast<std::size_t>(tile_columns));
+                const int tile_y = static_cast<int>(tile_index / static_cast<std::size_t>(tile_columns));
 
                 godot_rt::Tile tile;
-                tile.origin = Vector2i(x, y);
+                tile.origin = Vector2i(tile_x * TILE_SIZE, tile_y * TILE_SIZE);
                 tile.size = Vector2i(
-                    std::min(TILE_SIZE, image_size.x - x),
-                    std::min(TILE_SIZE, image_size.y - y)
+                    std::min(TILE_SIZE, image_size.x - tile.origin.x),
+                    std::min(TILE_SIZE, image_size.y - tile.origin.y)
                 );
                 tile.pass_index = 0;
                 tracer.render_tile(tile);
@@ -1251,10 +1292,12 @@ namespace {
                 if (tiles_done != nullptr) {
                     tiles_done->fetch_add(1, std::memory_order_relaxed);
                 }
-            }
-        }
+            },
+            cancellation_check
+        );
 
-        return true;
+        // 调度器返回时所有 helper 均已 join，tile 计数和 Film 不会再被后台计算线程修改。
+        return !result.cancelled && result.completed_task_count == tile_count;
     }
 
     bool render_selected_pixel(godot_rt::CpuPathTracer& tracer,
@@ -1296,18 +1339,25 @@ namespace {
         return true;
     }
 
-    // 执行真正的渲染管线：reset tracer、设置加速结构、渲染 tile、把 Film 转 Image 并保存 PNG。
-    // 所有提前返回都会补齐 outcome、写 timing log，保证同步和异步路径的失败信息一致。
-    RenderOutcome execute_render_request(const RenderRequest& request,
-                                         const char* mode,
-                                         const std::atomic_bool* cancel_requested,
-                                         std::atomic_int* tiles_done) {
+    // 同步入口在提交线程执行完整渲染管线，包括计算、Image 转换、PNG 保存和 timing log。
+    // 所有提前返回都会补齐 outcome，保持既有同步返回字段和失败语义。
+    RenderOutcome execute_sync_render_request(const RenderRequest& request,
+                                              const char* mode,
+                                              const std::atomic_bool* cancel_requested,
+                                              std::atomic_int* tiles_done) {
         RenderOutcome outcome = make_initial_outcome(request);
         std::vector<TimingEntry> timing_entries = request.timing_entries;
         std::atomic_int local_tiles_done{0};
         std::atomic_int* effective_tiles_done = tiles_done != nullptr ? tiles_done : &local_tiles_done;
+        const unsigned int compute_thread_count = render_compute_thread_count(request);
 
         godot_rt::CpuPathTracer tracer;
+        if (godot_rt::select_render_log_delivery(compute_thread_count, true) ==
+            godot_rt::RenderLogDelivery::Direct) {
+            tracer.set_log_sink([](const String& message) {
+                godot_rt::Logger::info(message);
+            });
+        }
         const auto tracer_reset_start = TimingClock::now();
         tracer.reset(request.scene, request.camera, request.settings);
         add_timing(&timing_entries, "tracer_reset", elapsed_ms(tracer_reset_start));
@@ -1344,6 +1394,7 @@ namespace {
                 render_completed = render_one_pass(
                     tracer,
                     request.settings.image_size,
+                    compute_thread_count,
                     cancel_requested,
                     effective_tiles_done
                 );
@@ -1354,6 +1405,7 @@ namespace {
             render_timing_name,
             elapsed_ms(render_start)
         );
+        // `render_one_pass` 返回时所有 helper 均已 join；此后才读取统计和 Film，并创建 Godot `Image`。
         copy_render_statistics(tracer, &outcome);
         if (!render_completed) {
             outcome.cancelled = true;
@@ -1470,6 +1522,196 @@ namespace {
         return outcome;
     }
 
+    // 异步计算阶段仅操作渲染器自有数据，不创建 Image、FileAccess 等 Godot Object。
+    std::unique_ptr<RenderComputation> compute_async_render_request(
+        const RenderRequest& request,
+        const std::atomic_bool* cancel_requested,
+        std::atomic_int* tiles_done
+    ) {
+        auto computation = std::make_unique<RenderComputation>();
+        computation->outcome = make_initial_outcome(request);
+        computation->tracer = std::make_unique<godot_rt::CpuPathTracer>();
+
+        std::vector<TimingEntry>& timing_entries = computation->outcome.timing_entries;
+        std::atomic_int local_tiles_done{0};
+        std::atomic_int* effective_tiles_done = tiles_done != nullptr ? tiles_done : &local_tiles_done;
+        const unsigned int compute_thread_count = render_compute_thread_count(request);
+        const godot_rt::RenderLogDelivery log_delivery = godot_rt::select_render_log_delivery(
+            compute_thread_count,
+            false
+        );
+        if (log_delivery == godot_rt::RenderLogDelivery::Deferred) {
+            computation->tracer->set_log_sink([computation_ptr = computation.get()](const String& message) {
+                computation_ptr->deferred_logs.push_back(message);
+            });
+        }
+
+        const auto tracer_reset_start = TimingClock::now();
+        computation->tracer->reset(request.scene, request.camera, request.settings);
+        add_timing(&timing_entries, "tracer_reset", elapsed_ms(tracer_reset_start));
+
+        const auto build_accel_start = TimingClock::now();
+        computation->tracer->set_accel(std::make_unique<godot_rt::BruteForceAccel>());
+        add_timing(&timing_entries, "build_accel", elapsed_ms(build_accel_start));
+
+        const auto render_start = TimingClock::now();
+        const char* render_timing_name = "render_tiles";
+        switch (request.selection.mode) {
+            case RenderMode::Pixel:
+                render_timing_name = "render_pixel";
+                computation->render_completed = render_selected_pixel(
+                    *computation->tracer,
+                    request.selection.target_pixel,
+                    cancel_requested,
+                    effective_tiles_done
+                );
+                break;
+            case RenderMode::Tile:
+                render_timing_name = "render_selected_tile";
+                computation->render_completed = render_selected_tile(
+                    *computation->tracer,
+                    request.settings.image_size,
+                    request.selection.target_tile,
+                    cancel_requested,
+                    effective_tiles_done
+                );
+                break;
+            case RenderMode::Full:
+            default:
+                computation->render_completed = render_one_pass(
+                    *computation->tracer,
+                    request.settings.image_size,
+                    compute_thread_count,
+                    cancel_requested,
+                    effective_tiles_done
+                );
+                break;
+        }
+        add_timing(&timing_entries, render_timing_name, elapsed_ms(render_start));
+
+        // 所有辅助线程均已结束，清空 sink 后才允许提交线程接管计算结果。
+        computation->tracer->set_log_sink({});
+        copy_render_statistics(*computation->tracer, &computation->outcome);
+        computation->outcome.tiles_done = effective_tiles_done->load(std::memory_order_relaxed);
+        if (!computation->render_completed ||
+            (cancel_requested != nullptr && cancel_requested->load(std::memory_order_relaxed))) {
+            computation->outcome.cancelled = true;
+            computation->outcome.error = "Render cancelled.";
+        }
+        return computation;
+    }
+
+    // 收尾阶段必须在提交请求的原线程执行，集中完成日志投递、Image 创建和文件写入。
+    RenderOutcome finalize_async_render_computation(
+        const RenderRequest& request,
+        RenderComputation* computation,
+        const char* mode,
+        const std::atomic_bool* cancel_requested
+    ) {
+        RenderOutcome outcome = computation != nullptr ? computation->outcome : make_initial_outcome(request);
+        if (std::this_thread::get_id() != request.submission_thread_id) {
+            outcome.ok = false;
+            outcome.error = "Render finalization must run on the submission thread.";
+            return outcome;
+        }
+
+        if (computation == nullptr || computation->tracer == nullptr) {
+            outcome.ok = false;
+            outcome.error = "Render computation is unavailable.";
+            outcome.total_ms = elapsed_ms(request.total_start);
+            write_timing_log(request, outcome, mode);
+            return outcome;
+        }
+
+        for (const String& message : computation->deferred_logs) {
+            godot_rt::Logger::info(message);
+        }
+        computation->deferred_logs.clear();
+
+        std::vector<TimingEntry>& timing_entries = outcome.timing_entries;
+        const auto finish_outcome = [&]() -> RenderOutcome {
+            outcome.total_ms = elapsed_ms(request.total_start);
+            write_timing_log(request, outcome, mode);
+            return outcome;
+        };
+
+        if (!computation->render_completed ||
+            (cancel_requested != nullptr && cancel_requested->load(std::memory_order_relaxed))) {
+            outcome.ok = false;
+            outcome.cancelled = true;
+            outcome.error = "Render cancelled.";
+            return finish_outcome();
+        }
+
+        const godot_rt::CpuPathTracer& tracer = *computation->tracer;
+        const auto film_to_image_start = TimingClock::now();
+        Ref<Image> image = film_to_image(
+            tracer.get_film(),
+            request.settings.image_size,
+            request.output_postprocess_settings
+        );
+        add_timing(&timing_entries, "film_to_image", elapsed_ms(film_to_image_start));
+        if (image.is_null()) {
+            outcome.error = "Could not create output image.";
+            return finish_outcome();
+        }
+
+        const auto save_png_start = TimingClock::now();
+        const Error save_error = image->save_png(request.save_path);
+        add_timing(&timing_entries, "save_png", elapsed_ms(save_png_start));
+        if (save_error != OK) {
+            outcome.error = "Could not save PNG.";
+            return finish_outcome();
+        }
+
+        const auto primary_hit_mask_to_image_start = TimingClock::now();
+        Ref<Image> primary_hit_mask = primary_hit_mask_to_image(tracer, request.settings.image_size);
+        add_timing(&timing_entries, "primary_hit_mask_to_image", elapsed_ms(primary_hit_mask_to_image_start));
+        if (primary_hit_mask.is_null()) {
+            outcome.error = "Could not create primary hit mask image.";
+            return finish_outcome();
+        }
+
+        const auto save_primary_hit_mask_png_start = TimingClock::now();
+        const Error save_primary_hit_mask_error = primary_hit_mask->save_png(request.primary_hit_mask_path);
+        add_timing(&timing_entries, "save_primary_hit_mask_png", elapsed_ms(save_primary_hit_mask_png_start));
+        if (save_primary_hit_mask_error != OK) {
+            outcome.error = "Could not save primary hit mask PNG.";
+            return finish_outcome();
+        }
+
+        if (request.selection.mode == RenderMode::Tile) {
+            const auto tile_debug_to_image_start = TimingClock::now();
+            Ref<Image> tile_debug_base = film_to_linear_clamped_debug_image(
+                tracer.get_film(),
+                request.settings.image_size
+            );
+            Ref<Image> tile_debug_image = tile_debug_overlay_to_image(
+                tile_debug_base,
+                request.settings.image_size,
+                request.selection.target_tile
+            );
+            add_timing(&timing_entries, "tile_debug_to_image", elapsed_ms(tile_debug_to_image_start));
+            if (tile_debug_image.is_null()) {
+                outcome.error = "Could not create tile debug image.";
+                return finish_outcome();
+            }
+
+            const auto save_tile_debug_png_start = TimingClock::now();
+            const Error save_tile_debug_error = tile_debug_image->save_png(
+                make_tile_debug_path(request.save_path, request.selection)
+            );
+            add_timing(&timing_entries, "save_tile_debug_png", elapsed_ms(save_tile_debug_png_start));
+            if (save_tile_debug_error != OK) {
+                outcome.error = "Could not save tile debug PNG.";
+                return finish_outcome();
+            }
+        }
+
+        outcome.ok = true;
+        return finish_outcome();
+    }
+
     // 异步入口在前置校验失败时仍返回 job 字段，方便脚本侧复用同一套状态读取逻辑。
     Dictionary make_validation_job_error(Dictionary error_result) {
         error_result["job_id"] = 0;
@@ -1549,7 +1791,7 @@ namespace {
             return error_result;
         }
 
-        const RenderOutcome outcome = execute_render_request(request, "sync", nullptr, nullptr);
+        const RenderOutcome outcome = execute_sync_render_request(request, "sync", nullptr, nullptr);
         return make_result(outcome.ok, outcome.path, outcome.primary_hit_mask_path, outcome.error, outcome.image_size,
                            outcome.samples_per_pixel, outcome.timing_log_path, outcome.total_ms,
                            outcome.selection, outcome.triangle_count, outcome.light_statistics,
@@ -1586,13 +1828,17 @@ namespace {
                 std::this_thread::yield();
             }
 
-            const RenderOutcome outcome = execute_render_request(job->request, "async",
-                                                                 &job->cancel_requested, &job->tiles_done);
+            std::unique_ptr<RenderComputation> computation = compute_async_render_request(
+                job->request,
+                &job->cancel_requested,
+                &job->tiles_done
+            );
             {
                 std::lock_guard<std::mutex> result_lock(job->result_mutex);
-                job->outcome = outcome;
+                job->outcome = computation->outcome;
+                job->computation = std::move(computation);
             }
-            job->done.store(true, std::memory_order_release);
+            job->compute_done.store(true, std::memory_order_release);
         });
 
         {
@@ -1612,10 +1858,32 @@ namespace {
     }
 
     // 调用方已经持有 g_jobs_mutex 时使用这个 helper。
-    // 如果 worker 已结束，则在这里 join，避免线程对象在任务仍保留时长期处于 joinable 状态。
+    // 纯计算完成后先 join worker；仅原提交线程可以执行 Godot Object 收尾并发布最终 done 状态。
     Dictionary make_job_status_locked(const std::shared_ptr<RenderJob>& job) {
-        if (job->done.load(std::memory_order_acquire) && job->worker.joinable()) {
+        if (job->compute_done.load(std::memory_order_acquire) && job->worker.joinable()) {
             job->worker.join();
+        }
+
+        if (job->compute_done.load(std::memory_order_acquire) &&
+            !job->done.load(std::memory_order_relaxed) &&
+            std::this_thread::get_id() == job->request.submission_thread_id) {
+            std::unique_ptr<RenderComputation> computation;
+            {
+                std::lock_guard<std::mutex> result_lock(job->result_mutex);
+                computation = std::move(job->computation);
+            }
+
+            const RenderOutcome outcome = finalize_async_render_computation(
+                job->request,
+                computation.get(),
+                "async",
+                &job->cancel_requested
+            );
+            {
+                std::lock_guard<std::mutex> result_lock(job->result_mutex);
+                job->outcome = outcome;
+            }
+            job->done.store(true, std::memory_order_release);
         }
 
         return make_running_job_result(job);
