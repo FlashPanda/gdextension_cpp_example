@@ -2,8 +2,8 @@
 extends EditorPlugin
 
 const OUTPUT_PATH := ""
-const SAMPLES_PER_PIXEL := 16
-const MAX_DEPTH := 4
+const SAMPLES_PER_PIXEL := 256
+const MAX_DEPTH := 16
 const SEED := 1
 const NO_JOB_ID := 0
 const TILE_SIZE := 16

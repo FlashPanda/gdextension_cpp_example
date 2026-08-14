@@ -192,6 +192,7 @@
   - 请求快照记录提交线程 ID，错误线程只能读取运行状态，不能进入 Godot Object 收尾；计算完成后再取消仍不会发布图像产物。
   - 保留 REQ-002 的“本机逻辑线程数减一”策略、tile 划分、确定性、统计、公开 Dictionary 和插件轮询协议。
 - **关键文件：**
+  - `docs/req005_threading_and_async_export.md` — 面向阅读者的线程模型、日志策略、异步状态机、源码路线与 timing 指标说明。
   - `src/render/render_execution_policy.h/.cpp` — 直接、延迟、禁用三态日志策略。
   - `src/render/integrators.h/.cpp` — 可注入日志 sink；禁用时跳过消息构造。
   - `src/render/cpu_path_tracer.h/.cpp` — 日志 sink 在 integrator 重建时保持生效。
