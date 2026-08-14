@@ -35,6 +35,8 @@ set_target_properties(gdexample_index PROPERTIES
 
 include(CTest)
 if(BUILD_TESTING)
+    find_package(Threads REQUIRED)
+
     add_executable(raytrace_postprocess_tests
         tests/render/color_postprocess_tests.cpp
         src/render/color_postprocess.cpp
@@ -51,4 +53,23 @@ if(BUILD_TESTING)
         CXX_EXTENSIONS OFF
     )
     add_test(NAME raytrace_postprocess_tests COMMAND raytrace_postprocess_tests)
+
+    add_executable(raytrace_parallel_task_tests
+        tests/render/parallel_task_scheduler_tests.cpp
+        src/render/parallel_task_scheduler.cpp
+        src/render/render_execution_policy.cpp
+        src/render/render_statistics.cpp
+    )
+    target_include_directories(raytrace_parallel_task_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    )
+    target_compile_features(raytrace_parallel_task_tests PRIVATE cxx_std_17)
+    target_link_libraries(raytrace_parallel_task_tests PRIVATE Threads::Threads)
+    if(MSVC)
+        target_compile_options(raytrace_parallel_task_tests PRIVATE /utf-8)
+    endif()
+    set_target_properties(raytrace_parallel_task_tests PROPERTIES
+        CXX_EXTENSIONS OFF
+    )
+    add_test(NAME raytrace_parallel_task_tests COMMAND raytrace_parallel_task_tests)
 endif()

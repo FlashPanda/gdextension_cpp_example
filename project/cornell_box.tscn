@@ -22,5 +22,4 @@ surface_material_override/7 = ExtResource("3_odqg0")
 
 [node name="OmniLight3D" type="OmniLight3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.269478, 2.62136, -0.315166)
-light_energy = 20.0
 omni_attenuation = 0.0
