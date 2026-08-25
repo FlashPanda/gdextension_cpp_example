@@ -8,6 +8,7 @@
 #include <ctime>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <thread>
 #include <unordered_map>
 #include <vector>
@@ -23,7 +24,7 @@
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/color.hpp>
 
-#include "accel/brute_force_accel.h"
+#include "accel/acceleration_structure.h"
 #include "render/color_postprocess.h"
 #include "render/cpu_path_tracer.h"
 #include "render/film.h"
@@ -93,6 +94,7 @@ namespace {
         godot_rt::Scene scene;
         godot_rt::Camera camera;
         godot_rt::CpuPathTracerSettings settings;
+        godot_rt::AccelerationType acceleration_type = godot_rt::AccelerationType::BruteForce;
         godot_rt::OutputPostprocessSettings output_postprocess_settings;
         RenderSelection selection;
         String save_path;
@@ -119,6 +121,7 @@ namespace {
         int32_t triangle_count = 0;
         LightStatistics light_statistics;
         RenderSelection selection;
+        godot_rt::AccelerationType acceleration_type = godot_rt::AccelerationType::BruteForce;
         int tiles_done = 0;
         int total_tiles = 0;
         int64_t primary_ray_count = 0;
@@ -323,7 +326,9 @@ namespace {
                            int64_t primary_ray_count,
                            int64_t primary_ray_hit_count,
                            int64_t primary_ray_miss_count,
-                           double intersection_ms) {
+                           double intersection_ms,
+                           godot_rt::AccelerationType acceleration_type =
+                               godot_rt::AccelerationType::BruteForce) {
         Dictionary result;
         result["ok"] = ok;
         result["path"] = path;
@@ -343,6 +348,7 @@ namespace {
         add_primary_ray_statistics_to_result(result, primary_ray_count, primary_ray_hit_count,
                                              primary_ray_miss_count);
         result["intersection_ms"] = intersection_ms;
+        result["acceleration"] = String(godot_rt::acceleration_type_name(acceleration_type));
         return result;
     }
 
@@ -367,11 +373,13 @@ namespace {
                                int64_t primary_ray_count,
                                int64_t primary_ray_hit_count,
                                int64_t primary_ray_miss_count,
-                               double intersection_ms) {
+                               double intersection_ms,
+                               godot_rt::AccelerationType acceleration_type =
+                                   godot_rt::AccelerationType::BruteForce) {
         Dictionary result = make_result(ok, path, primary_hit_mask_path, error, image_size, samples_per_pixel,
                                         timing_log_path, total_ms, selection, triangle_count,
                                         light_statistics, primary_ray_count, primary_ray_hit_count,
-                                        primary_ray_miss_count, intersection_ms);
+                                        primary_ray_miss_count, intersection_ms, acceleration_type);
         result["job_id"] = job_id;
         result["exists"] = exists;
         result["done"] = done;
@@ -442,6 +450,20 @@ namespace {
         selection.target_tile = get_vector2i_option(options, "target_tile", Vector2i(0, 0));
         if (out_selection != nullptr) {
             *out_selection = selection;
+        }
+        return true;
+    }
+
+    bool parse_acceleration_selection(const Dictionary& options,
+                                      godot_rt::AccelerationType* out_type,
+                                      String* out_error) {
+        const String value = get_string_option(options, "acceleration", "brute_force");
+        const std::string utf8_value(value.utf8().get_data());
+        if (!godot_rt::parse_acceleration_type(utf8_value, out_type)) {
+            if (out_error != nullptr) {
+                *out_error = "Invalid acceleration. Expected \"brute_force\", \"bvh\", or \"octree\".";
+            }
+            return false;
         }
         return true;
     }
@@ -998,6 +1020,7 @@ namespace {
         outcome.triangle_count = request.scene.triangle_count();
         outcome.light_statistics = collect_light_statistics(request.scene);
         outcome.selection = request.selection;
+        outcome.acceleration_type = request.acceleration_type;
         outcome.total_tiles = request.selection.mode == RenderMode::Full
                                   ? total_tile_count(request.settings.image_size)
                                   : 1;
@@ -1054,6 +1077,8 @@ namespace {
                          String::num_int64(request.settings.image_size.y));
         file->store_line(String("samples_per_pixel: ") + String::num_int64(request.settings.samples_per_pixel));
         file->store_line(String("max_depth: ") + String::num_int64(request.settings.max_depth));
+        file->store_line(String("acceleration: ") +
+                         String(godot_rt::acceleration_type_name(request.acceleration_type)));
         file->store_line(String("triangle_count: ") + String::num_int64(outcome.triangle_count));
         file->store_line(String("primary_ray_count: ") + String::num_int64(outcome.primary_ray_count));
         file->store_line(String("primary_ray_hit_count: ") + String::num_int64(outcome.primary_ray_hit_count));
@@ -1121,6 +1146,7 @@ namespace {
                                 int32_t max_depth,
                                 int64_t seed,
                                 const RenderSelection& selection,
+                                godot_rt::AccelerationType acceleration_type,
                                 TimingClock::time_point total_start,
                                 RenderRequest* out_request,
                                 Dictionary* out_error_result) {
@@ -1223,6 +1249,7 @@ namespace {
         request.camera = make_render_camera(camera);
         request.output_postprocess_settings = capture_output_postprocess_settings(camera);
         request.selection = selection;
+        request.acceleration_type = acceleration_type;
         request.save_path = save_path;
         request.primary_hit_mask_path = primary_hit_mask_path;
         request.timing_log_path = timing_log_path;
@@ -1363,7 +1390,7 @@ namespace {
         add_timing(&timing_entries, "tracer_reset", elapsed_ms(tracer_reset_start));
 
         const auto build_accel_start = TimingClock::now();
-        tracer.set_accel(std::make_unique<godot_rt::BruteForceAccel>());
+        tracer.set_accel(godot_rt::create_acceleration_structure(request.acceleration_type));
         add_timing(&timing_entries, "build_accel", elapsed_ms(build_accel_start));
 
         const auto render_start = TimingClock::now();
@@ -1551,7 +1578,7 @@ namespace {
         add_timing(&timing_entries, "tracer_reset", elapsed_ms(tracer_reset_start));
 
         const auto build_accel_start = TimingClock::now();
-        computation->tracer->set_accel(std::make_unique<godot_rt::BruteForceAccel>());
+        computation->tracer->set_accel(godot_rt::create_acceleration_structure(request.acceleration_type));
         add_timing(&timing_entries, "build_accel", elapsed_ms(build_accel_start));
 
         const auto render_start = TimingClock::now();
@@ -1748,7 +1775,7 @@ namespace {
                                outcome.samples_per_pixel, outcome.timing_log_path, outcome.total_ms,
                                outcome.selection, outcome.triangle_count, outcome.light_statistics,
                                outcome.primary_ray_count, outcome.primary_ray_hit_count, outcome.primary_ray_miss_count,
-                               outcome.intersection_ms);
+                               outcome.intersection_ms, outcome.acceleration_type);
     }
 
     Dictionary make_selection_error_result(const Dictionary& options,
@@ -1782,12 +1809,14 @@ namespace {
                                         int32_t samples_per_pixel,
                                         int32_t max_depth,
                                         int64_t seed,
-                                        const RenderSelection& selection) {
+                                        const RenderSelection& selection,
+                                        godot_rt::AccelerationType acceleration_type) {
         const auto total_start = TimingClock::now();
         RenderRequest request;
         Dictionary error_result;
         if (!prepare_render_request(root, camera, image_size, output_path, samples_per_pixel, max_depth, seed,
-                                    selection, total_start, &request, &error_result)) {
+                                    selection, acceleration_type, total_start, &request, &error_result)) {
+            error_result["acceleration"] = String(godot_rt::acceleration_type_name(acceleration_type));
             return error_result;
         }
 
@@ -1796,7 +1825,7 @@ namespace {
                            outcome.samples_per_pixel, outcome.timing_log_path, outcome.total_ms,
                            outcome.selection, outcome.triangle_count, outcome.light_statistics,
                            outcome.primary_ray_count, outcome.primary_ray_hit_count, outcome.primary_ray_miss_count,
-                           outcome.intersection_ms);
+                           outcome.intersection_ms, outcome.acceleration_type);
     }
 
     Dictionary start_render_scene_to_png_impl(Node* root,
@@ -1806,12 +1835,14 @@ namespace {
                                               int32_t samples_per_pixel,
                                               int32_t max_depth,
                                               int64_t seed,
-                                              const RenderSelection& selection) {
+                                              const RenderSelection& selection,
+                                              godot_rt::AccelerationType acceleration_type) {
         const auto total_start = TimingClock::now();
         RenderRequest request;
         Dictionary error_result;
         if (!prepare_render_request(root, camera, image_size, output_path, samples_per_pixel, max_depth, seed,
-                                    selection, total_start, &request, &error_result)) {
+                                    selection, acceleration_type, total_start, &request, &error_result)) {
+            error_result["acceleration"] = String(godot_rt::acceleration_type_name(acceleration_type));
             return make_validation_job_error(error_result);
         }
 
@@ -1854,7 +1885,8 @@ namespace {
                                request.settings.samples_per_pixel, request.timing_log_path, 0.0,
                                request.selection, request.scene.triangle_count(),
                                job->outcome.light_statistics, job->outcome.primary_ray_count,
-                               job->outcome.primary_ray_hit_count, job->outcome.primary_ray_miss_count, 0.0);
+                               job->outcome.primary_ray_hit_count, job->outcome.primary_ray_miss_count, 0.0,
+                               request.acceleration_type);
     }
 
     // 调用方已经持有 g_jobs_mutex 时使用这个 helper。
@@ -1957,7 +1989,8 @@ Dictionary RayTraceExporter::render_scene_to_png(Node* root,
         samples_per_pixel,
         max_depth,
         seed,
-        RenderSelection()
+        RenderSelection(),
+        godot_rt::AccelerationType::BruteForce
     );
 }
 
@@ -1968,8 +2001,12 @@ Dictionary RayTraceExporter::render_scene_to_png_with_options(Node* root,
                                                               Vector2i image_size,
                                                               const Dictionary& options) {
     RenderSelection selection;
+    godot_rt::AccelerationType acceleration_type = godot_rt::AccelerationType::BruteForce;
     String error;
     if (!parse_render_selection(options, &selection, &error)) {
+        return make_selection_error_result(options, image_size, selection, error);
+    }
+    if (!parse_acceleration_selection(options, &acceleration_type, &error)) {
         return make_selection_error_result(options, image_size, selection, error);
     }
 
@@ -1981,7 +2018,8 @@ Dictionary RayTraceExporter::render_scene_to_png_with_options(Node* root,
         get_int_option(options, "samples_per_pixel", 1),
         get_int_option(options, "max_depth", 2),
         get_int64_option(options, "seed", 1),
-        selection
+        selection,
+        acceleration_type
     );
 }
 
@@ -2002,7 +2040,8 @@ Dictionary RayTraceExporter::start_render_scene_to_png(Node* root,
         samples_per_pixel,
         max_depth,
         seed,
-        RenderSelection()
+        RenderSelection(),
+        godot_rt::AccelerationType::BruteForce
     );
 }
 
@@ -2012,8 +2051,12 @@ Dictionary RayTraceExporter::start_render_scene_to_png_with_options(Node* root,
                                                                     Vector2i image_size,
                                                                     const Dictionary& options) {
     RenderSelection selection;
+    godot_rt::AccelerationType acceleration_type = godot_rt::AccelerationType::BruteForce;
     String error;
     if (!parse_render_selection(options, &selection, &error)) {
+        return make_validation_job_error(make_selection_error_result(options, image_size, selection, error));
+    }
+    if (!parse_acceleration_selection(options, &acceleration_type, &error)) {
         return make_validation_job_error(make_selection_error_result(options, image_size, selection, error));
     }
 
@@ -2025,7 +2068,8 @@ Dictionary RayTraceExporter::start_render_scene_to_png_with_options(Node* root,
         get_int_option(options, "samples_per_pixel", 1),
         get_int_option(options, "max_depth", 2),
         get_int64_option(options, "seed", 1),
-        selection
+        selection,
+        acceleration_type
     );
 }
 

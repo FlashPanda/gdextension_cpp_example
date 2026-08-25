@@ -10,8 +10,12 @@ const TILE_SIZE := 16
 const MODE_FULL := 0
 const MODE_PIXEL := 1
 const MODE_TILE := 2
+const ACCEL_BRUTE_FORCE := 0
+const ACCEL_BVH := 1
+const ACCEL_OCTREE := 2
 
 var _button: Button
+var _acceleration_option: OptionButton
 var _render_mode_option: OptionButton
 var _target_x_spin_box: SpinBox
 var _target_y_spin_box: SpinBox
@@ -20,6 +24,13 @@ var _cancel_requested := false
 
 
 func _enter_tree() -> void:
+	_acceleration_option = OptionButton.new()
+	_acceleration_option.add_item("Brute Force", ACCEL_BRUTE_FORCE)
+	_acceleration_option.add_item("BVH", ACCEL_BVH)
+	_acceleration_option.add_item("Octree", ACCEL_OCTREE)
+	_acceleration_option.tooltip_text = "Choose the scene intersection structure. Brute Force uses no acceleration."
+	add_control_to_container(EditorPlugin.CONTAINER_SPATIAL_EDITOR_MENU, _acceleration_option)
+
 	_render_mode_option = OptionButton.new()
 	_render_mode_option.add_item("Full", MODE_FULL)
 	_render_mode_option.add_item("Pixel", MODE_PIXEL)
@@ -82,6 +93,18 @@ func _render_mode_name(mode: int) -> String:
 			return "full"
 
 
+func _current_acceleration_name() -> String:
+	if _acceleration_option == null:
+		return "brute_force"
+	match _acceleration_option.get_selected_id():
+		ACCEL_BVH:
+			return "bvh"
+		ACCEL_OCTREE:
+			return "octree"
+		_:
+			return "brute_force"
+
+
 func _update_target_controls() -> void:
 	var mode := _current_render_mode()
 	var show_target := mode != MODE_FULL
@@ -136,6 +159,11 @@ func _exit_tree() -> void:
 		_render_mode_option.queue_free()
 		_render_mode_option = null
 
+	if _acceleration_option != null:
+		remove_control_from_container(EditorPlugin.CONTAINER_SPATIAL_EDITOR_MENU, _acceleration_option)
+		_acceleration_option.queue_free()
+		_acceleration_option = null
+
 
 func _process(_delta: float) -> void:
 	if _active_job_id == NO_JOB_ID:
@@ -171,6 +199,7 @@ func _process(_delta: float) -> void:
 	var render_mode := String(result.get("render_mode", "full"))
 	var triangle_count := int(result.get("triangle_count", 0))
 	var intersection_ms := float(result.get("intersection_ms", 0.0))
+	var acceleration := String(result.get("acceleration", "brute_force"))
 	var error := String(result.get("error", "unknown error"))
 
 	ClassDB.class_call_static(&"RayTraceExporter", &"release_render_job", job_id)
@@ -184,20 +213,20 @@ func _process(_delta: float) -> void:
 		print("Ray trace PNG export cancelled.")
 		_print_timing_log_path(timing_log_path)
 		_print_elapsed_time(total_ms, render_mode)
-		_print_render_statistics(triangle_count, intersection_ms, result)
+		_print_render_statistics(triangle_count, intersection_ms, acceleration, result)
 		return
 
 	if not ok:
 		push_error("Ray trace export failed: %s" % error)
 		_print_timing_log_path(timing_log_path)
 		_print_elapsed_time(total_ms, render_mode)
-		_print_render_statistics(triangle_count, intersection_ms, result)
+		_print_render_statistics(triangle_count, intersection_ms, acceleration, result)
 		return
 
 	print("Ray trace PNG saved to %s" % path)
 	_print_timing_log_path(timing_log_path)
 	_print_elapsed_time(total_ms, render_mode)
-	_print_render_statistics(triangle_count, intersection_ms, result)
+	_print_render_statistics(triangle_count, intersection_ms, acceleration, result)
 
 
 func _on_trace_pressed() -> void:
@@ -247,6 +276,7 @@ func _start_render_job() -> void:
 		"max_depth": MAX_DEPTH,
 		"seed": SEED,
 		"render_mode": _render_mode_name(render_mode_id),
+		"acceleration": _current_acceleration_name(),
 		"target_pixel": target,
 		"target_tile": target,
 	}
@@ -285,6 +315,7 @@ func _start_render_job() -> void:
 		_print_render_statistics(
 			int(result.get("triangle_count", 0)),
 			float(result.get("intersection_ms", 0.0)),
+			String(result.get("acceleration", _current_acceleration_name())),
 			result
 		)
 		return
@@ -329,6 +360,8 @@ func _reset_job_state() -> void:
 		_button.text = "Trace PNG"
 	if _render_mode_option != null:
 		_render_mode_option.disabled = false
+	if _acceleration_option != null:
+		_acceleration_option.disabled = false
 	_update_target_controls()
 
 
@@ -340,6 +373,8 @@ func _update_button_progress(progress: float) -> void:
 	_button.disabled = false
 	if _render_mode_option != null:
 		_render_mode_option.disabled = true
+	if _acceleration_option != null:
+		_acceleration_option.disabled = true
 	if _target_x_spin_box != null:
 		_target_x_spin_box.editable = false
 	if _target_y_spin_box != null:
@@ -363,8 +398,14 @@ func _bool_text(value: bool) -> String:
 	return "true" if value else "false"
 
 
-func _print_render_statistics(triangle_count: int, intersection_ms: float, result: Dictionary) -> void:
+func _print_render_statistics(
+	triangle_count: int,
+	intersection_ms: float,
+	acceleration: String,
+	result: Dictionary
+) -> void:
 	print("Ray trace triangles: %d" % triangle_count)
+	print("Ray trace acceleration: %s" % acceleration)
 	print(
 		"Ray trace primary rays: total=%d hit=%d miss=%d" % [
 			int(result.get("primary_ray_count", 0)),

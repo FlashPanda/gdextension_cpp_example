@@ -1,0 +1,11 @@
+D:/gdextension_cpp_example/build/CMakeFiles/gdexample_index.dir
+D:/gdextension_cpp_example/build/CMakeFiles/Experimental.dir
+D:/gdextension_cpp_example/build/CMakeFiles/Nightly.dir
+D:/gdextension_cpp_example/build/CMakeFiles/Continuous.dir
+D:/gdextension_cpp_example/build/CMakeFiles/NightlyMemoryCheck.dir
+D:/gdextension_cpp_example/build/CMakeFiles/raytrace_postprocess_tests.dir
+D:/gdextension_cpp_example/build/CMakeFiles/raytrace_parallel_task_tests.dir
+D:/gdextension_cpp_example/build/CMakeFiles/raytrace_accel_tests.dir
+D:/gdextension_cpp_example/build/CMakeFiles/RUN_TESTS.dir
+D:/gdextension_cpp_example/build/CMakeFiles/ALL_BUILD.dir
+D:/gdextension_cpp_example/build/CMakeFiles/ZERO_CHECK.dir

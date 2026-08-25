@@ -225,6 +225,58 @@
 - **已知限制或后续工作：**
   - 异步最终收尾要求由创建任务的同一提交线程调用 `poll_render_job` 或 `cancel_render_job`；其他线程可以查询进度，但不会代替提交线程操作 Godot Object。
 
+### REQ-006 — 可选 BVH、Octree 与暴力场景求交
+
+- **完成日期：** `2026-08-24`
+- **原始需求：**
+  - 当前场景只保存顶点（三角形）数据，没有使用 BVH 结构。
+  - 为场景创建 BVH 和 OCT（Octree）结构，作为场景求交的加速结构。
+  - 渲染时可以选择 BVH、Octree，或不使用加速结构并沿用现有暴力求交。
+- **实现摘要：**
+  - 抽取共享 Moller-Trumbore 三角形求交、Hit 插值填充和 AABB slab 求交；现有暴力结构改用同一基础逻辑，三条路径保持相同 epsilon、`t_max`、最近命中和 triangleIndex 语义。
+  - 新增 BVH：复制场景 world-space 三角形，以最大质心轴的中位数递归二分，叶节点最多 4 个三角形；按包围盒入射距离优先遍历，递归调用栈不产生每条光线的堆分配。
+  - 新增 Octree：使用场景立方根包围盒，最多 16 层、叶节点最多 8 个三角形；只有 AABB 完全属于单一子节点的三角形才下沉，跨分割面三角形保留在父节点，避免重复存储和重复求交；遍历使用固定 8 项数组排序。
+  - 新增 `AccelerationType`、名称解析与工厂；options 支持 `brute_force`、`bvh`、`octree`，并兼容 `none`/`oct` 别名，缺省继续使用暴力求交，非法值在场景提取和任务创建前失败。
+  - acceleration 作为纯值请求快照贯穿同步与异步渲染；结构在 tracer reset 后 build，随后由 tile 线程并发只读；返回 Dictionary、轮询状态和 timing log 均记录规范名称。
+  - 编辑器 3D 工具栏增加 Brute Force、BVH、Octree 下拉选择，任务运行时锁定，完成统计打印实际结构。
+- **关键文件：**
+  - `src/accel/aabb.h/.cpp`、`triangle_intersection.h/.cpp` — 共享包围盒、三角形求交和 Hit 填充。
+  - `src/accel/bvh_accel.h/.cpp` — BVH build 与最近/任意命中遍历。
+  - `src/accel/octree_accel.h/.cpp` — Octree build、父节点保留策略与遍历。
+  - `src/accel/acceleration_structure.h/.cpp` — 类型解析、规范名称和结构工厂。
+  - `src/accel/brute_force_accel.cpp` — 复用共享三角形逻辑的无加速基准。
+  - `src/raytrace_exporter.cpp` — options 校验、请求快照、同步/异步结构创建、结果与 timing log 回显。
+  - `project/addons/raytrace_exporter/raytrace_exporter_plugin.gd` — 编辑器结构选择控件。
+  - `tests/accel/acceleration_structure_tests.cpp`、`tests/godot/req006_acceleration_selection_smoke.gd`、`CMakeLists.txt` — 原生等价性和 Godot 集成覆盖。
+- **验收标准：**
+  - [x] 暴力、BVH、Octree 的 `intersect()`/`intersect_p()` 与 Hit 字段逐项等价。
+  - [x] 空场景、退化三角形、平行/未命中、有限 `t_max`、跨分区大三角形、21 三角形强制分裂场景和最近命中均有原生回归。
+  - [x] BVH/Octree build 后只读，32×32 Full smoke 通过 4 个互不重叠 tile 并发使用；遍历热路径不做堆分配。
+  - [x] options 三种规范值、默认暴力、别名和非法值均按定义处理；非法值不启动渲染。
+  - [x] 同步 Full/Pixel/Tile、异步 Full、结果 Dictionary 和 timing log 均保留实际 acceleration。
+  - [x] 编辑器下拉选择和运行期锁定已实现，headless editor 完整加载插件成功。
+  - [x] 原生测试、两种 DLL 构建、REQ-006 集成及 REQ-001/002/005 回归、注释检查和 diff 检查均通过。
+- **测试先行证据：**
+  - 原生 RED：`cmake --build build/req006-tests --target raytrace_accel_tests --config Debug` — MSVC `C1083`，缺少目标 API `accel/acceleration_structure.h`。
+  - Godot RED：旧 DLL 执行 `req006_acceleration_selection_smoke.gd`，在完成暴力渲染后失败：`Render brute_force_full did not report the selected acceleration.`。
+  - GREEN：`ctest --test-dir build/req006-tests -C Debug --output-on-failure` — `3/3` 全部通过；REQ-006 smoke 输出 `REQ006_SMOKE PASS acceleration=brute_force,bvh,octree pixels=1024`。
+- **完整验证：**
+  - `cmake -S . -B build/req006-tests -G "Visual Studio 17 2022" -A x64 -DBUILD_TESTING=ON` — 配置成功。
+  - `cmake --build build/req006-tests --config Debug` — 三个原生测试目标构建成功；加速测试无需链接本机特定 godot-cpp 库。
+  - `ctest --test-dir build/req006-tests -C Debug --output-on-failure` — `100% tests passed, 0 tests failed out of 3`。
+  - `scons platform=windows target=template_debug -j4` — template_debug DLL 编译、链接成功。
+  - `scons platform=windows target=template_debug dev_build=yes -j4` — 首次因旧 `register_types` 对象缺失 PDB 触发 `LNK4099/LNK1218`；一致重编译依赖后按原命令再次执行，带调试符号的 dev DLL 编译、链接成功。
+  - `req006_acceleration_selection_smoke.gd`（独立 `--log-file`）— 退出码 `0`；三种 Full 输出逐字节一致，Pixel/Tile、异步 Octree、非法值、结果回显和 timing log 断言通过。
+  - `req001_output_postprocess_smoke.gd` — 退出码 `0`，输出后处理回归通过。
+  - `req002_multithreaded_render_smoke.gd` — 退出码 `0`，输出 `full_primary_rays=1024 serial_primary_rays=1024 cancelled_tiles=0`。
+  - `req005_async_main_thread_finalize_smoke.gd` — 退出码 `0`，输出 `artifacts_before_poll=0 finalized_on_poll=1 cancelled_artifacts=0`。
+  - Godot `--headless --editor --quit` — 退出码 `0`，项目和插件初始化完成；仍输出项目既有的 ClassDB 常量和 SVG `currentColor` 警告。
+  - `git diff --check` 与新增文件尾随空白检查 — 通过，仅有工作树既有的 LF/CRLF 提示。
+- **关联记录：** `REQ-002`、`REQ-005`。
+- **已知限制或后续工作：**
+  - 加速结构按每次渲染请求重新 build，不序列化、不跨请求缓存，也不支持动态增量更新。
+  - BVH 使用确定性中位数划分而非 SAH；Octree 使用保守的父节点保留策略而非三角形裁剪/复制。两者保证正确性，但针对特定大型场景的参数调优和性能基准应作为独立需求。
+
 ---
 
 ## 完成记录模板
