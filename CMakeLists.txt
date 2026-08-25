@@ -72,4 +72,28 @@ if(BUILD_TESTING)
         CXX_EXTENSIONS OFF
     )
     add_test(NAME raytrace_parallel_task_tests COMMAND raytrace_parallel_task_tests)
+
+    add_executable(raytrace_accel_tests
+        tests/accel/acceleration_structure_tests.cpp
+        src/accel/aabb.cpp
+        src/accel/acceleration_structure.cpp
+        src/accel/brute_force_accel.cpp
+        src/accel/bvh_accel.cpp
+        src/accel/octree_accel.cpp
+        src/accel/triangle_intersection.cpp
+    )
+    target_include_directories(raytrace_accel_tests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+        "${CMAKE_CURRENT_SOURCE_DIR}/godot-cpp/include"
+        "${CMAKE_CURRENT_SOURCE_DIR}/godot-cpp/gen/include"
+        "${CMAKE_CURRENT_SOURCE_DIR}/godot-cpp/gdextension"
+    )
+    target_compile_features(raytrace_accel_tests PRIVATE cxx_std_17)
+    if(MSVC)
+        target_compile_options(raytrace_accel_tests PRIVATE /utf-8)
+    endif()
+    set_target_properties(raytrace_accel_tests PROPERTIES
+        CXX_EXTENSIONS OFF
+    )
+    add_test(NAME raytrace_accel_tests COMMAND raytrace_accel_tests)
 endif()
