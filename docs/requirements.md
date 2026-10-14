@@ -23,6 +23,39 @@
 
 ## 待开发需求
 
+### REQ-007 — 新增独立 SAH BVH 加速类型
+
+- **状态：** 待验证
+- **提出日期：** `2026-10-14`
+- **原始需求：**
+  - 在 `AccelerationType` 中新增 SAH 类型，按 pbrt-v4 的 SAH 构建算法实现 BVH，并统一继承 `AccelInterface`。
+  - 使用 SCons 编译扩展；最终编译后不运行测试或 Godot。
+- **范围与非目标：**
+  - 范围：独立的 `SahBvhAccel`、共享 BVH 存储与遍历、12 桶 SAH 构建、`sah` 选项和编辑器选择。
+  - 非目标：替换现有中位数 BVH、移植 pbrt 的 HLBVH、线性节点布局或并行构建。
+- **关联记录：** `REQ-006`。
+- **验收标准：**
+  - [x] `Sah` 枚举、工厂、大小写不敏感的 `sah` 参数和编辑器选项完整接入，旧枚举值与默认值保持不变。
+  - [x] SAH 使用 pbrt-v4 的最大质心轴、12 桶面积代价、常规叶容量 1 和退化停止规则；中位数 BVH 行为保持不变。
+  - [x] 两种 BVH 共用节点与求交遍历，SAH 对暴力求交保持最近命中、`Hit` 字段及 `t_max` 语义。
+  - [ ] 原生 RED/GREEN、SCons 扩展编译和必要的 Godot 集成验证完成。
+- **开发任务：**
+  - [x] 1. 补充原生测试和集成测试用例，确认原生 RED。
+  - [x] 2. 提取共享 BVH 核心并实现 SAH 分裂和退化处理。
+  - [x] 3. 接入工厂、导出参数和编辑器，更新当前使用文档。
+  - [x] 4. 运行原生 GREEN 与回归，最终用 SCons 编译扩展。
+  - [x] 5. 记录验证结果；未运行集成测试前保留为“待验证”，不归档。
+- **测试计划与命令：**
+  - 原生测试：`cmake --build build/req007-tests --target raytrace_accel_tests --config Debug`；`ctest --test-dir build/req007-tests -C Debug --output-on-failure -R raytrace_accel_tests`。
+  - 最终扩展编译：`scons platform=windows target=template_debug dev_build=yes -j4`；之后不运行测试或 Godot。
+- **验证结果：**
+  - 实现前（RED）：`cmake --build build/req007-tests --target raytrace_accel_tests --config Debug` 退出码 `1`，MSVC `C1083` 缺少 `accel/bvh_tree.h`，确认共享 BVH 核心尚不存在。
+  - 实现后（GREEN）：`cmake --build build/req007-tests --target raytrace_accel_tests --config Debug` 成功；`ctest --test-dir build/req007-tests -C Debug --output-on-failure -R raytrace_accel_tests` 为 `1/1` 通过。
+  - 构建 / 集成验证：`scons platform=windows target=template_debug dev_build=yes -j4` 退出码 `0`，生成 `project/bin/libgdexample.windows.template_debug.dev.x86_64.dll`（4,122,112 字节）；`git diff --check` 通过。Godot 集成测试按本次要求未运行。
+- **阻塞项或决策记录：**
+  - SAH 使用 pbrt-v4 的递归分裂规则，沿用项目的节点与遍历；常规叶容量为 1，退化时允许多三角形叶。
+  - 最终编译后不运行测试，因此若 Godot 集成未实际验证，本需求保留“待验证”。
+
 ## 需求模板
 
 ### REQ-XXX — 简短标题

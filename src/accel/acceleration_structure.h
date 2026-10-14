@@ -12,6 +12,7 @@ namespace godot_rt {
         BruteForce,
         Bvh,
         Octree,
+        Sah,
     };
 
     const char* acceleration_type_name(AccelerationType type);

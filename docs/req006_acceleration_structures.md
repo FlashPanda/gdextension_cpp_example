@@ -2,13 +2,14 @@
 
 本文面向需要继续维护或扩展 CPU 光线追踪器的开发者，说明场景求交加速结构的架构、数据流、算法选择、线程边界和验证方式。
 
-本文讨论的实现包含三种可选路径：
+本文保留 REQ-006 的原始设计说明；REQ-007 在此基础上增加 SAH BVH。当前实现包含四种可选路径：
 
 | 模式 | 规范名称 | 作用 |
 | --- | --- | --- |
 | 暴力求交 | `brute_force` | 逐个测试场景中的全部三角形，不建立空间层次结构 |
 | 包围体层次 | `bvh` | 使用 BVH 逐层裁剪不可能命中的三角形 |
 | 八叉树 | `octree` | 使用空间八分递归裁剪求交范围 |
+| 表面积启发式 BVH | `sah` | 使用 12 桶 SAH 选择 BVH 分裂位置 |
 
 默认模式仍然是 `brute_force`，因此不传 `acceleration` 选项的旧调用保持原有行为。
 
@@ -77,7 +78,7 @@ Hit 或布尔命中结果
 | --- | --- | --- |
 | 接口层 | `src/accel/accel_interface.h` | 定义 `build`、`intersect`、`intersect_p` 语义 |
 | 公共几何层 | `src/accel/aabb.*`、`src/accel/triangle_intersection.*` | AABB、slab 求交、Moller-Trumbore 求交和 Hit 填充 |
-| 结构实现层 | `brute_force_accel.*`、`bvh_accel.*`、`octree_accel.*` | 三种场景求交实现 |
+| 结构实现层 | `brute_force_accel.*`、`bvh_accel.*`、`sah_bvh_accel.*`、`octree_accel.*` | 四种场景求交实现 |
 | 选择和管线层 | `acceleration_structure.*`、`raytrace_exporter.cpp` | 解析选项、创建结构、接入同步/异步渲染 |
 
 ## 3. 核心接口与所有权
@@ -125,7 +126,7 @@ BVH、Octree 和暴力结构在 `build()` 时复制 `scene.get_triangles()`。�
 
 ## 4. 公共求交语义
 
-三种结构共享 `src/accel/triangle_intersection.*`，避免不同实现逐渐产生数值语义分叉。
+四种结构共享 `src/accel/triangle_intersection.*`，避免不同实现逐渐产生数值语义分叉。
 
 ### 4.1 三角形求交
 
@@ -232,9 +233,13 @@ BVH 构建过程：
 
 如果所有三角形中心在各轴上都几乎重合，则停止继续分裂，避免无意义的递归。
 
-这里使用中位数划分而不是 SAH，原因是实现简单、构建时间可控，并且行为确定。后续如果大型静态场景的性能成为瓶颈，可以单独引入 SAH 需求，不改变求交接口。
+`bvh` 模式仍使用中位数划分；REQ-007 新增的 `sah` 模式不改变其构建策略。
 
-### 7.3 遍历策略
+### 7.3 SAH 构建策略（REQ-007）
+
+`SahBvhAccel` 与 `BvhAccel` 都继承 `AccelInterface`，并共享 `BvhTree` 的节点存储和求交遍历。构建时缓存三角形 AABB 和质心；沿最大质心轴分为 12 桶，前缀和后缀累计候选分裂的三角形数量及包围盒面积，选择 `0.5 + (N_L A_L + N_R A_R) / A_parent` 最小的非空划分。常规叶节点容量为 1；零表面积或相同质心形成退化叶，无法产生非空桶划分时使用确定性中位数回退。
+
+### 7.4 遍历策略
 
 遍历一个内部节点时，先测试左右包围盒的入射距离：
 
@@ -288,6 +293,7 @@ enum class AccelerationType {
     BruteForce,
     Bvh,
     Octree,
+    Sah,
 };
 ```
 
@@ -297,9 +303,10 @@ enum class AccelerationType {
 BruteForce -> BruteForceAccel
 Bvh        -> BvhAccel
 Octree     -> OctreeAccel
+Sah        -> SahBvhAccel
 ```
 
-调用方只依赖 `AccelInterface`，不需要在渲染代码中写三套分支。
+调用方只依赖 `AccelInterface`，不需要在渲染代码中按结构写分支。
 
 ### 9.2 options 选项
 
@@ -320,12 +327,13 @@ Octree     -> OctreeAccel
 | `bvh` | BVH |
 | `octree` | Octree |
 | `oct` | Octree，兼容别名 |
+| `sah` | SAH BVH |
 
 解析会忽略大小写。未知值（例如 `grid`）直接返回错误，不启动渲染。结果字典和 timing log 使用规范名称，不回显别名。
 
 ### 9.3 编辑器插件
 
-编辑器插件在 3D 工具栏中提供 Brute Force、BVH、Octree 下拉框。任务运行期间控件锁定，避免用户在已有请求快照后改变 UI 选择造成状态误解。
+编辑器插件在 3D 工具栏中提供 Brute Force、BVH、Octree、SAH BVH 下拉框。任务运行期间控件锁定，避免用户在已有请求快照后改变 UI 选择造成状态误解。
 
 ## 10. 同步和异步渲染生命周期
 
@@ -411,9 +419,10 @@ Full 模式将图像拆成 `16 × 16` tile。调度器通过原子任务索引�
 | --- | --- | --- | --- |
 | 暴力 | `O(1)` 额外结构构建 | `O(N)` | 最简单，适合小场景和基准 |
 | BVH | 中位数递归划分，约 `O(N log N)` | 通常显著少于 `N` 个三角形测试 | 构建简单稳定，但不是 SAH 最优 |
+| SAH BVH | 12 桶递归划分，约 `O(N log N)`（退化时更高） | 受场景分布影响 | 构建代价高于中位数 BVH，叶通常只有一个三角形 |
 | Octree | 递归空间划分，最坏受深度限制 | 受空间分布影响 | 三角形不复制，跨分区大三角形会留在父节点 |
 
-当前优先级是正确性、确定性和线程边界清晰，而不是对所有场景做极限性能调优。后续性能需求应使用真实场景基准决定是否调整叶节点大小、深度、包围盒膨胀或引入 SAH。
+当前优先级是正确性、确定性和线程边界清晰。后续性能需求应使用真实场景基准决定是否调整叶节点大小、深度或包围盒膨胀。
 
 ## 13. 测试覆盖
 
@@ -423,7 +432,7 @@ Full 模式将图像拆成 `16 × 16` tile。调度器通过原子任务索引�
 
 覆盖内容包括：
 
-- 三种类型名称解析和工厂创建；
+- 四种类型名称解析和工厂创建；
 - `none`、`oct` 别名和未知选项拒绝；
 - 空场景、退化三角形、平行射线和未命中；
 - 有限 `t_max`；
@@ -447,7 +456,7 @@ ctest --test-dir build/req006-tests -C Debug --output-on-failure
 
 集成测试验证：
 
-- 三种 Full 输出逐字节一致；
+- 四种 Full 输出逐字节一致；
 - 选择项正确回显到结果 Dictionary；
 - BVH Pixel 模式只生成一个主射线；
 - Octree Tile 模式只渲染目标 tile；
@@ -467,7 +476,7 @@ ctest --test-dir build/req006-tests -C Debug --output-on-failure
 
 阅读 `src/accel/aabb.*` 和 `src/accel/triangle_intersection.*`，重点是 `t_max`、`T_MIN`、Hit 插值和同距命中规则。
 
-### 第三步：对比三种结构
+### 第三步：对比四种结构
 
 按以下顺序阅读：
 
@@ -489,7 +498,7 @@ src/accel/octree_accel.cpp
 
 ### 第六步：阅读测试
 
-最后阅读 `tests/accel/acceleration_structure_tests.cpp` 和 `tests/godot/req006_acceleration_selection_smoke.gd`。测试是实现约束的可执行说明，尤其能帮助理解跨分区三角形、有限 `t_max` 和三种结构结果等价的要求。
+最后阅读 `tests/accel/acceleration_structure_tests.cpp` 和 `tests/godot/req006_acceleration_selection_smoke.gd`。测试是实现约束的可执行说明，尤其能帮助理解跨分区三角形、有限 `t_max` 和四种结构结果等价的要求。
 
 ## 15. 后续扩展指南
 
@@ -524,7 +533,7 @@ src/accel/octree_accel.cpp
 ## 16. 已知限制
 
 1. 结构不跨渲染请求缓存，每次请求都重新复制三角形并构建。
-2. BVH 使用确定性中位数划分，不保证 SAH 意义上的最优树。
+2. `bvh` 使用确定性中位数划分；`sah` 使用分桶近似 SAH，不保证全局最优树。
 3. Octree 不复制跨分区三角形，因此大三角形可能在父节点被多个射线检查。
 4. 多个异步任务同时运行时，线程数按任务分别计算，可能过量订阅 CPU。
 5. 当前验证重点是命中等价性和线程安全；不同场景的性能参数仍需独立基准需求。
@@ -532,6 +541,7 @@ src/accel/octree_accel.cpp
 ## 17. 相关文档和记录
 
 - [REQ-006 完成记录](completed_requirements.md#req-006--可选-bvh、octree-与暴力场景求交)
+- [REQ-007 开发记录](requirements.md#req-007--新增独立-sah-bvh-加速类型)
 - [REQ-002 多线程光线追踪](completed_requirements.md#req-002--使用本机逻辑线程数减一并行计算光线追踪)
 - [REQ-005 异步导出线程边界](req005_threading_and_async_export.md)
 - [项目加速结构源码](../src/accel/)

@@ -23,7 +23,7 @@ func _run() -> void:
     await process_frame
 
     var results: Array[Dictionary] = []
-    for acceleration in ["brute_force", "bvh", "octree"]:
+    for acceleration in ["brute_force", "bvh", "octree", "sah"]:
         var result := _render_sync(acceleration, "full", {})
         if result.is_empty():
             return
@@ -45,6 +45,12 @@ func _run() -> void:
     var timing_file := FileAccess.open(bvh_timing_path, FileAccess.READ)
     if timing_file == null or not timing_file.get_as_text().contains("acceleration: bvh"):
         _fail("Timing log did not record the selected BVH acceleration.")
+        return
+
+    var sah_timing_path := String(results[3].get("timing_log_path", ""))
+    var sah_timing_file := FileAccess.open(sah_timing_path, FileAccess.READ)
+    if sah_timing_file == null or not sah_timing_file.get_as_text().contains("acceleration: sah"):
+        _fail("Timing log did not record the selected SAH acceleration.")
         return
 
     var pixel_result := _render_sync(
@@ -70,7 +76,7 @@ func _run() -> void:
     if not _verify_invalid_acceleration():
         return
 
-    print("REQ006_SMOKE PASS acceleration=brute_force,bvh,octree pixels=%d" % (IMAGE_SIZE.x * IMAGE_SIZE.y))
+    print("REQ006_SMOKE PASS acceleration=brute_force,bvh,octree,sah pixels=%d" % (IMAGE_SIZE.x * IMAGE_SIZE.y))
     _cleanup()
     quit(0)
 

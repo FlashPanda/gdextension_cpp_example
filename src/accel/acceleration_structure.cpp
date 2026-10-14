@@ -6,6 +6,7 @@
 #include "brute_force_accel.h"
 #include "bvh_accel.h"
 #include "octree_accel.h"
+#include "sah_bvh_accel.h"
 
 namespace godot_rt {
 
@@ -15,6 +16,8 @@ const char* acceleration_type_name(AccelerationType type) {
             return "bvh";
         case AccelerationType::Octree:
             return "octree";
+        case AccelerationType::Sah:
+            return "sah";
         case AccelerationType::BruteForce:
         default:
             return "brute_force";
@@ -34,6 +37,8 @@ bool parse_acceleration_type(const std::string& value, AccelerationType* out_typ
         type = AccelerationType::Bvh;
     } else if (normalized == "octree" || normalized == "oct") {
         type = AccelerationType::Octree;
+    } else if (normalized == "sah") {
+        type = AccelerationType::Sah;
     } else {
         return false;
     }
@@ -50,6 +55,8 @@ std::unique_ptr<AccelInterface> create_acceleration_structure(AccelerationType t
             return std::make_unique<BvhAccel>();
         case AccelerationType::Octree:
             return std::make_unique<OctreeAccel>();
+        case AccelerationType::Sah:
+            return std::make_unique<SahBvhAccel>();
         case AccelerationType::BruteForce:
         default:
             return std::make_unique<BruteForceAccel>();

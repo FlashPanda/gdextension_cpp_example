@@ -79,7 +79,9 @@ if(BUILD_TESTING)
         src/accel/acceleration_structure.cpp
         src/accel/brute_force_accel.cpp
         src/accel/bvh_accel.cpp
+        src/accel/bvh_tree.cpp
         src/accel/octree_accel.cpp
+        src/accel/sah_bvh_accel.cpp
         src/accel/triangle_intersection.cpp
     )
     target_include_directories(raytrace_accel_tests PRIVATE
