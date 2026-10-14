@@ -202,3 +202,5 @@ cmake-build*/
 
 # CMake related
 CMakeUserPresets.json
+
+/build
