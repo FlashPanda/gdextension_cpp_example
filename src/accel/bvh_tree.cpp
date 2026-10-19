@@ -48,12 +48,14 @@ int sah_bucket(const godot::Vector3& centroid, int axis, real_t minimum, real_t 
 
 BvhTree::BvhTree(BvhSplitMethod method) : split_method(method) {}
 
-void BvhTree::build(const Scene& scene) {
-    // 生命周期：构建时复制 world-space 三角形；完成后两种 BVH 均只读，供 tile 线程共享。
+void BvhTree::build(const Scene& scene, const BvhBuildOptions& options) {
+    // 生命周期：构建时复制 world-space 三角形；build 返回后各 BVH 均只读，供 tile 线程共享。
+    // 同一实例不能同时 build 和求交；HLBVH 的辅助线程在发布根索引前已全部 join。
     triangles = scene.get_triangles();
     primitive_indices.resize(triangles.size());
     std::iota(primitive_indices.begin(), primitive_indices.end(), 0);
     nodes.clear();
+    root_index = -1;
     nodes.reserve(triangles.empty() ? 0 : triangles.size() * 2 - 1);
 
     std::vector<PrimitiveInfo> primitive_info(triangles.size());
@@ -62,7 +64,9 @@ void BvhTree::build(const Scene& scene) {
         primitive_info[index].centroid = bounds_centroid(primitive_info[index].bounds);
     }
     if (!triangles.empty()) {
-        build_node(0, triangles.size(), primitive_info);
+        root_index = split_method == BvhSplitMethod::Hlbvh
+            ? build_hlbvh(primitive_info, options)
+            : build_node(0, triangles.size(), primitive_info);
     }
 }
 
@@ -210,21 +214,27 @@ std::size_t BvhTree::node_count() const {
 }
 
 std::size_t BvhTree::root_left_primitive_count() const {
-    if (nodes.empty() || nodes[0].is_leaf()) {
+    if (root_index < 0 || nodes[root_index].is_leaf()) {
         return 0;
     }
-    return nodes[nodes[0].right].first - nodes[0].first;
+    return subtree_primitive_count(nodes[root_index].left);
+}
+
+std::size_t BvhTree::subtree_primitive_count(int node_index) const {
+    const Node& node = nodes[node_index];
+    return node.is_leaf() ? node.count
+        : subtree_primitive_count(node.left) + subtree_primitive_count(node.right);
 }
 
 bool BvhTree::intersect(const Ray& ray, Hit* hit, real_t t_max) const {
-    if (nodes.empty()) {
+    if (root_index < 0) {
         return false;
     }
 
     real_t closest_t = t_max;
     int closest_index = -1;
     TriangleIntersection closest_intersection;
-    intersect_node(0, ray, &closest_t, &closest_index, &closest_intersection);
+    intersect_node(root_index, ray, &closest_t, &closest_index, &closest_intersection);
     if (closest_index < 0) {
         return false;
     }
@@ -272,7 +282,7 @@ void BvhTree::intersect_node(int node_index, const Ray& ray, real_t* closest_t,
 }
 
 bool BvhTree::intersect_p(const Ray& ray, real_t t_max) const {
-    return !nodes.empty() && intersect_node_p(0, ray, t_max);
+    return root_index >= 0 && intersect_node_p(root_index, ray, t_max);
 }
 
 bool BvhTree::intersect_node_p(int node_index, const Ray& ray, real_t t_max) const {

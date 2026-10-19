@@ -13,6 +13,7 @@ namespace godot_rt {
         Bvh,
         Octree,
         Sah,
+        Hlbvh,
     };
 
     const char* acceleration_type_name(AccelerationType type);

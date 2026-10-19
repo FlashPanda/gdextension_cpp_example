@@ -2,6 +2,10 @@ cmake_minimum_required(VERSION 3.17)
 
 project(gdextension_cpp_example_index LANGUAGES CXX)
 
+# 可复用隔离构建生成的头文件，避免测试配置向只读的 godot-cpp 目录写入。
+set(GODOT_CPP_GENERATED_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/godot-cpp/gen/include"
+    CACHE PATH "Existing generated godot-cpp headers")
+
 file(GLOB_RECURSE GDEXAMPLE_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h"
@@ -23,7 +27,7 @@ add_library(gdexample_index STATIC EXCLUDE_FROM_ALL ${GDEXAMPLE_SOURCES}
 target_include_directories(gdexample_index PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
     "${CMAKE_CURRENT_SOURCE_DIR}/godot-cpp/include"
-    "${CMAKE_CURRENT_SOURCE_DIR}/godot-cpp/gen/include"
+    "${GODOT_CPP_GENERATED_INCLUDE_DIR}"
     "${CMAKE_CURRENT_SOURCE_DIR}/godot-cpp/gdextension"
 )
 
@@ -75,11 +79,15 @@ if(BUILD_TESTING)
 
     add_executable(raytrace_accel_tests
         tests/accel/acceleration_structure_tests.cpp
+        tests/accel/hlbvh_tests.cpp
         src/accel/aabb.cpp
         src/accel/acceleration_structure.cpp
         src/accel/brute_force_accel.cpp
         src/accel/bvh_accel.cpp
         src/accel/bvh_tree.cpp
+        src/accel/bvh_hlbvh.cpp
+        src/accel/hlbvh_accel.cpp
+        src/render/parallel_task_scheduler.cpp
         src/accel/octree_accel.cpp
         src/accel/sah_bvh_accel.cpp
         src/accel/triangle_intersection.cpp
@@ -87,10 +95,11 @@ if(BUILD_TESTING)
     target_include_directories(raytrace_accel_tests PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/src"
         "${CMAKE_CURRENT_SOURCE_DIR}/godot-cpp/include"
-        "${CMAKE_CURRENT_SOURCE_DIR}/godot-cpp/gen/include"
+        "${GODOT_CPP_GENERATED_INCLUDE_DIR}"
         "${CMAKE_CURRENT_SOURCE_DIR}/godot-cpp/gdextension"
     )
     target_compile_features(raytrace_accel_tests PRIVATE cxx_std_17)
+    target_link_libraries(raytrace_accel_tests PRIVATE Threads::Threads)
     if(MSVC)
         target_compile_options(raytrace_accel_tests PRIVATE /utf-8)
     endif()

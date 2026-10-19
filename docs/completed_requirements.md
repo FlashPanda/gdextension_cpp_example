@@ -277,6 +277,100 @@
   - 加速结构按每次渲染请求重新 build，不序列化、不跨请求缓存，也不支持动态增量更新。
   - BVH 使用确定性中位数划分而非 SAH；Octree 使用保守的父节点保留策略而非三角形裁剪/复制。两者保证正确性，但针对特定大型场景的参数调优和性能基准应作为独立需求。
 
+### REQ-007 — 新增独立 SAH BVH 加速类型
+
+- **状态：** 已完成
+- **完成日期：** `2026-10-17`
+- **提出日期：** `2026-10-14`
+- **原始需求：**
+  - 在 `AccelerationType` 中新增 SAH 类型，按 pbrt-v4 的 SAH 构建算法实现 BVH，并统一继承 `AccelInterface`。
+  - 使用 SCons 编译扩展；最终编译后不运行测试或 Godot。
+- **范围与非目标：**
+  - 范围：独立的 `SahBvhAccel`、共享 BVH 存储与遍历、12 桶 SAH 构建、`sah` 选项和编辑器选择。
+  - 非目标：替换现有中位数 BVH、移植 pbrt 的 HLBVH、线性节点布局或并行构建。
+- **关联记录：** `REQ-006`。
+- **验收标准：**
+  - [x] `Sah` 枚举、工厂、大小写不敏感的 `sah` 参数和编辑器选项完整接入，旧枚举值与默认值保持不变。
+  - [x] SAH 使用 pbrt-v4 的最大质心轴、12 桶面积代价、常规叶容量 1 和退化停止规则；中位数 BVH 行为保持不变。
+  - [x] 两种 BVH 共用节点与求交遍历，SAH 对暴力求交保持最近命中、`Hit` 字段及 `t_max` 语义。
+  - [x] 原生 RED/GREEN、SCons 扩展编译和必要的 Godot 集成验证完成。
+- **开发任务：**
+  - [x] 1. 补充原生测试和集成测试用例，确认原生 RED。
+  - [x] 2. 提取共享 BVH 核心并实现 SAH 分裂和退化处理。
+  - [x] 3. 接入工厂、导出参数和编辑器，更新当前使用文档。
+  - [x] 4. 运行原生 GREEN 与回归，最终用 SCons 编译扩展。
+  - [x] 5. 记录验证结果；未运行集成测试前保留为“待验证”，不归档。
+- **测试计划与命令：**
+  - 原生测试：`cmake --build build/req007-tests --target raytrace_accel_tests --config Debug`；`ctest --test-dir build/req007-tests -C Debug --output-on-failure -R raytrace_accel_tests`。
+  - 最终扩展编译：`scons platform=windows target=template_debug dev_build=yes -j4`；之后不运行测试或 Godot。
+- **验证结果：**
+  - 实现前（RED）：`cmake --build build/req007-tests --target raytrace_accel_tests --config Debug` 退出码 `1`，MSVC `C1083` 缺少 `accel/bvh_tree.h`，确认共享 BVH 核心尚不存在。
+  - 实现后（GREEN）：`cmake --build build/req007-tests --target raytrace_accel_tests --config Debug` 成功；`ctest --test-dir build/req007-tests -C Debug --output-on-failure -R raytrace_accel_tests` 为 `1/1` 通过。
+  - 构建 / 集成验证：`scons platform=windows target=template_debug dev_build=yes -j4` 退出码 `0`，生成 `project/bin/libgdexample.windows.template_debug.dev.x86_64.dll`（4,122,112 字节）；`git diff --check` 通过。Godot 集成测试按本次要求未运行。
+- **阻塞项或决策记录：**
+  - SAH 使用 pbrt-v4 的递归分裂规则，沿用项目的节点与遍历；常规叶容量为 1，退化时允许多三角形叶。
+  - 最终编译后不运行测试，因此若 Godot 集成未实际验证，本需求保留“待验证”。
+- **2026-10-17 补充验证与归档：**
+  - 用户在 REQ-008 中明确授权测试与构建，并要求继续完成未完成项；本次补齐 REQ-007 剩余集成验证。上文“最终编译后不运行测试”是前次请求的历史限制，并非本次测试限制。
+  - 原生 `ctest --test-dir build/req008-native --output-on-failure` 为 3/3 通过，其中保留 SAH 工厂、8/1 分裂、17 节点、退化停止和完整求交等价性测试。
+  - 本次 SCons dev DLL 构建成功；Godot 加速选择 smoke 包含 sah，五种模式图像字节一致，SAH timing log 通过；编辑器插件加载成功。
+  - 复用 [REQ-008 完整验证记录](req008_hlbvh_validation.md) 中实际执行的 SCons、Godot 命令及输出；已满足全部验收标准。
+- **实现摘要：** 独立 SahBvhAccel 共享 BvhTree 存储/遍历，最大质心轴与 12 桶 SAH，叶阈值 1、退化停止；类型工厂、参数与编辑器已接入。
+- **关键文件：** `src/accel/sah_bvh_accel.h/.cpp`、`src/accel/bvh_tree.h/.cpp`、`src/accel/acceleration_structure.h/.cpp`、编辑器插件、原生加速测试及 Godot 加速选择 smoke。
+- **已知限制：** 按请求重新构建，无缓存或增量更新；定制 Godot 的已知诊断见 REQ-008 验证记录。
+
+### REQ-008 — 按现有架构接入并行 HLBVH
+
+- **状态：** 已完成
+- **完成日期：** `2026-10-17`
+- **提出日期：** `2026-10-17`
+- **原始需求：** 参考本地 pbrt-v4 的 HLBVH，继承当前代码结构，包含 Morton 编码和 LBVH 子树的并行构建。
+- **范围与非目标：**
+  - 新增 `HlbvhAccel`、共享 `BvhTree` 构建策略、30 位 Morton 稳定基数排序、高 12 位 treelet、上层 12 桶 SAH；接入工厂、导出参数、编辑器与测试。
+  - 复用现有调度器，线程独占 treelet 缓冲区，join 后确定性合并；不新增 GPU、动态更新、缓存或 pbrt 线性遍历布局。
+- **关联记录：** `REQ-006`、`REQ-007`。
+- **实现摘要：** 独立 `HlbvhAccel` 继承现有接口，构建复用 `BvhTree` 存储和遍历；并行 Morton/treelet、串行稳定排序/上层 SAH，根索引显式保存。共享 AABB 增加保守浮点余量，保持最终三角形 t_max 和原始索引语义。
+- **关键文件：**
+  - `src/accel/bvh_hlbvh.cpp`、`hlbvh_morton.h`、`hlbvh_accel.h/.cpp` — 分层构建和专用实现。
+  - `src/accel/bvh_tree.h/.cpp`、`aabb.cpp`、`acceleration_structure.h/.cpp` — 共享根、求交与类型接入。
+  - `src/raytrace_exporter.cpp`、编辑器插件、`CMakeLists.txt` — 参数、UI 与测试构建。
+  - `tests/accel/hlbvh_tests.cpp`、加速选择 smoke、`tests/godot/req008_hlbvh_editor_smoke.gd` — 原生和真实 Godot 验证。
+  - `docs/req006_acceleration_structures.md`、`docs/req008_hlbvh_validation.md` — 架构、完整命令、证据和已知限制。
+- **验收标准：**
+  - [x] 新类型及 `hlbvh` 参数完整接入，旧枚举值、默认值和现有类型行为保持兼容。
+  - [x] Morton / LBVH / 上层 SAH 及退化回退符合计划，复用现有节点和求交语义。
+  - [x] 单线程、并行、启动失败和重复构建结果一致；构建返回后可并发只读求交。
+  - [x] 原生求交、边界、结构与并发测试及 Godot 同步/异步、编辑器、日志集成验证通过。
+  - [x] 中文注释、文档、扩展构建和 diff 检查完成。
+- **开发任务：**
+  - [x] 1. 检查现有结构、pbrt 算法、重复需求及工具链。
+  - [x] 2. 添加最小失败测试并记录实际 RED。
+  - [x] 3. 实现 HLBVH 算法、根索引、确定性并行构建和故障回退。
+  - [x] 4. 接入枚举、工厂、编辑器和 Godot 集成测试。
+  - [x] 5. 执行 GREEN、回归、构建及集成验证，补充中文注释和架构文档。
+  - [x] 6. 全部验收通过后归档，否则保留阻塞及待验证项。
+- **测试计划与命令：**
+  - 原生：CMake 配置 `build/req008-native`，构建测试目标，执行 CTest；覆盖 Morton 边界/碰撞、treelet/SAH、空/单图元/rebuild、固定种子射线、完整 Hit 和 t_max、真实辅助线程及启动失败。
+  - 集成：扩展现有加速选择 smoke，比较五种模式并覆盖 HLBVH Full/Tile/Pixel、异步、日志与插件。
+  - 构建：用户批准在 `build/` 生成隔离产物，不允许修改原依赖文件；全部实际环境与命令见 [完整验证记录](req008_hlbvh_validation.md)。
+- **验证结果：**
+  - 原生 RED：CTest 实际失败 `parse HLBVH case-insensitively` / `HLBVH canonical name`；新增算法测试后编译实际因缺少 `accel/hlbvh_accel.h` 失败。
+  - 额外精度 RED：同距三角形回归实际失败（期望原始索引 8，得到 0）；AABB 的 `nextafter(5, 0)` 包围盒测试失败。原因是三角形求交 t 舍入为略小于盒面的数，导致其他同距叶被裁剪。
+  - GREEN：HLBVH 实现与保守 slab 误差余量修复后，`ctest --test-dir build/req008-native --output-on-failure` 为 `3/3` 通过（约 6.8 秒）。
+  - SCons：`python -B -m SCons -C build/req008-scons -Y D:/OtherEngines/gdextension_cpp_example platform=windows target=template_debug dev_build=yes gdextension_dir=D:/OtherEngines/gdextension_cpp_example/godot-cpp/gdextension -j4` 退出码 0，DLL 4,626,944 字节；Python/PYTHONPATH 的实际绝对路径见完整验证记录。
+  - Godot 加速选择 smoke：五种 Full 图像字节一致，HLBVH Pixel/Tile、异步和 timing log 通过，退出码 0。
+  - Godot 编辑器 smoke：`REQ008_EDITOR PASS option=hlbvh id=4 lock=ok`，退出码 0。
+  - Godot REQ-001/002/005 回归均退出码 0，输出后处理、串并行确定性、异步主线程收尾与取消全部通过。
+  - `git diff --check` 通过；中文注释与技能适用性检查完成，无需修改技能。
+- **阻塞项或决策记录：**
+  - 用户已确认包含并行构建；阈值和算法按 pbrt 默认值，求交与存储沿用项目结构。
+  - 初始环境缺少 `godot-cpp/gen/include`、`godot-cpp/bin` 和项目扩展描述文件；PATH 中未发现 CMake/SCons，继续检查本机工具。禁止写入 godot-cpp，也不创建或编辑 Python 代码。
+  - 用户随后明确允许在 `build/` 生成隔离绑定产物。使用现有 CMake 绑定生成入口并关闭 Python 字节码写入；未编写或编辑 Python 源码。CMake/MSVC 使用 VS 2026 的 Ninja 工具链。
+  - 新增浮点误差回归暴露现有共享 AABB 裁剪问题；修复仅放宽包围盒筛选，最终三角形 t_max 与同距选择规则保持原状。
+  - SCons 安装在 `build/req008-tools`；使用 repository 构建模式 `-C build/req008-scons -Y <仓库>`，构建目标经 dry-run 确认全部位于 build 下。仅 tools/include 通过目录联接读取原依赖；禁止生成字节码。
+  - 用户随后要求安装日常工具：Python 3.13.15、SCons 4.11.1 和用户 PATH 已验证；使用新安装的 SCons 再次完成完整构建，退出码 0。最终 DLL/PDB 已复制到 `project/bin/`。
+- **已知限制：** 未进行性能基准、ThreadSanitizer 或完整飞船美术场景交互测试；定制 Godot 的既有 ClassDB/currentColor 诊断与编辑器退出 RID 清理警告仍存在。验证使用最小隔离工程及真实插件副本，不把退出码 0 描述为无警告运行。
+
 ---
 
 ## 完成记录模板

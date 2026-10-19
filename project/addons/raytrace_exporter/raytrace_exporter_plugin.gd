@@ -14,6 +14,7 @@ const ACCEL_BRUTE_FORCE := 0
 const ACCEL_BVH := 1
 const ACCEL_OCTREE := 2
 const ACCEL_SAH := 3
+const ACCEL_HLBVH := 4
 
 var _button: Button
 var _acceleration_option: OptionButton
@@ -30,6 +31,7 @@ func _enter_tree() -> void:
 	_acceleration_option.add_item("BVH", ACCEL_BVH)
 	_acceleration_option.add_item("Octree", ACCEL_OCTREE)
 	_acceleration_option.add_item("SAH BVH", ACCEL_SAH)
+	_acceleration_option.add_item("HLBVH", ACCEL_HLBVH)
 	_acceleration_option.tooltip_text = "Choose the scene intersection structure. Brute Force uses no acceleration."
 	add_control_to_container(EditorPlugin.CONTAINER_SPATIAL_EDITOR_MENU, _acceleration_option)
 
@@ -105,6 +107,8 @@ func _current_acceleration_name() -> String:
 			return "octree"
 		ACCEL_SAH:
 			return "sah"
+		ACCEL_HLBVH:
+			return "hlbvh"
 		_:
 			return "brute_force"
 

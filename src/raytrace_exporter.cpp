@@ -461,7 +461,7 @@ namespace {
         const std::string utf8_value(value.utf8().get_data());
         if (!godot_rt::parse_acceleration_type(utf8_value, out_type)) {
             if (out_error != nullptr) {
-                *out_error = "Invalid acceleration. Expected \"brute_force\", \"bvh\", \"octree\", or \"sah\".";
+                *out_error = "Invalid acceleration. Expected \"brute_force\", \"bvh\", \"octree\", \"sah\", or \"hlbvh\".";
             }
             return false;
         }

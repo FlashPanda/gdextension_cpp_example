@@ -11,6 +11,8 @@
 #include "accel/octree_accel.h"
 #include "accel/sah_bvh_accel.h"
 
+bool run_hlbvh_tests();
+
 namespace {
 
 constexpr float EPSILON = 0.0001f;
@@ -180,6 +182,8 @@ bool test_acceleration_type_selection() {
     passed &= expect(std::string(godot_rt::acceleration_type_name(type)) == "sah", "SAH canonical name");
     passed &= expect(godot_rt::parse_acceleration_type("octree", &type), "parse octree");
     passed &= expect(type == godot_rt::AccelerationType::Octree, "octree enum");
+    passed &= expect(godot_rt::parse_acceleration_type("HLBVH", &type), "parse HLBVH case-insensitively");
+    passed &= expect(std::string(godot_rt::acceleration_type_name(type)) == "hlbvh", "HLBVH canonical name");
     passed &= expect(!godot_rt::parse_acceleration_type("grid", &type), "reject unknown acceleration");
 
     const std::vector<godot_rt::AccelerationType> types{
@@ -280,6 +284,7 @@ bool test_intersection_equivalence() {
 
 int main() {
     bool passed = true;
+    passed &= run_hlbvh_tests();
     passed &= test_acceleration_type_selection();
     passed &= test_sah_partition();
     passed &= test_intersection_equivalence();

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace godot_rt {
 namespace {
@@ -103,6 +104,12 @@ bool intersect_bounds(const AxisAlignedBounds& bounds, const Ray& ray, real_t t_
         if (axis_enter > axis_exit) {
             std::swap(axis_enter, axis_exit);
         }
+        // slab 与三角形交点的舍入路径不同；保守扩展区间，避免最近 t 略小于盒面时漏掉同距图元。
+        // 这里只放宽包围盒筛选，最终三角形求交仍严格遵守调用方的 t_max。
+        constexpr real_t machine_epsilon = std::numeric_limits<real_t>::epsilon() * real_t(0.5);
+        constexpr real_t error_factor = (real_t(6) * machine_epsilon) / (real_t(1) - real_t(3) * machine_epsilon);
+        if (std::isfinite(axis_enter)) axis_enter -= std::abs(axis_enter) * error_factor;
+        if (std::isfinite(axis_exit)) axis_exit += std::abs(axis_exit) * error_factor;
         t_enter = std::max(t_enter, axis_enter);
         t_exit = std::min(t_exit, axis_exit);
         if (t_enter > t_exit) {

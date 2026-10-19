@@ -23,7 +23,7 @@ func _run() -> void:
     await process_frame
 
     var results: Array[Dictionary] = []
-    for acceleration in ["brute_force", "bvh", "octree", "sah"]:
+    for acceleration in ["brute_force", "bvh", "octree", "sah", "hlbvh"]:
         var result := _render_sync(acceleration, "full", {})
         if result.is_empty():
             return
@@ -53,6 +53,20 @@ func _run() -> void:
         _fail("Timing log did not record the selected SAH acceleration.")
         return
 
+    var hlbvh_timing_file := FileAccess.open(String(results[4].get("timing_log_path", "")), FileAccess.READ)
+    if hlbvh_timing_file == null or not hlbvh_timing_file.get_as_text().contains("acceleration: hlbvh"):
+        _fail("Timing log did not record HLBVH.")
+        return
+
+    var hlbvh_pixel := _render_sync("hlbvh", "pixel", {"target_pixel": Vector2i(16, 16)})
+    if hlbvh_pixel.is_empty() or int(hlbvh_pixel.get("primary_ray_count", -1)) != 1:
+        _fail("HLBVH pixel mode did not render exactly one primary ray.")
+        return
+    var hlbvh_tile := _render_sync("hlbvh", "tile", {"target_tile": Vector2i.ZERO})
+    if hlbvh_tile.is_empty() or int(hlbvh_tile.get("primary_ray_count", -1)) != 256:
+        _fail("HLBVH tile mode did not render exactly one tile.")
+        return
+
     var pixel_result := _render_sync(
         "bvh",
         "pixel",
@@ -71,12 +85,14 @@ func _run() -> void:
         _fail("Octree tile mode did not render the selected tile.")
         return
 
-    if not await _verify_async_octree():
+    if not await _verify_async("octree"):
+        return
+    if not await _verify_async("hlbvh"):
         return
     if not _verify_invalid_acceleration():
         return
 
-    print("REQ006_SMOKE PASS acceleration=brute_force,bvh,octree,sah pixels=%d" % (IMAGE_SIZE.x * IMAGE_SIZE.y))
+    print("REQ006_SMOKE PASS acceleration=brute_force,bvh,octree,sah,hlbvh pixels=%d" % (IMAGE_SIZE.x * IMAGE_SIZE.y))
     _cleanup()
     quit(0)
 
@@ -151,8 +167,8 @@ func _render_sync(acceleration: String, render_mode: String, overrides: Dictiona
     return result
 
 
-func _verify_async_octree() -> bool:
-    var output_path := "%s/async_octree.png" % OUTPUT_DIR
+func _verify_async(acceleration: String) -> bool:
+    var output_path := "%s/async_%s.png" % [OUTPUT_DIR, acceleration]
     var start_value = ClassDB.class_call_static(
         &"RayTraceExporter",
         &"start_render_scene_to_png_with_options",
@@ -165,11 +181,11 @@ func _verify_async_octree() -> bool:
             "max_depth": 0,
             "seed": SEED,
             "render_mode": "full",
-            "acceleration": "octree",
+            "acceleration": acceleration,
         }
     )
     if not (start_value is Dictionary) or not bool(start_value.get("ok", false)):
-        _fail("Could not start async Octree render.")
+        _fail("Could not start async %s render." % acceleration)
         return false
 
     var job_id := int(start_value.get("job_id", 0))
@@ -183,10 +199,10 @@ func _verify_async_octree() -> bool:
         await process_frame
 
     if not bool(final_status.get("done", false)) or not bool(final_status.get("ok", false)):
-        _fail("Async Octree render did not complete successfully.")
+        _fail("Async %s render did not complete successfully." % acceleration)
         return false
-    if String(final_status.get("acceleration", "")) != "octree":
-        _fail("Async render did not preserve the selected Octree acceleration.")
+    if String(final_status.get("acceleration", "")) != acceleration:
+        _fail("Async render did not preserve %s acceleration." % acceleration)
         return false
 
     _track_paths(final_status)

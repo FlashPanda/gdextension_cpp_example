@@ -2,7 +2,7 @@
 
 本文面向需要继续维护或扩展 CPU 光线追踪器的开发者，说明场景求交加速结构的架构、数据流、算法选择、线程边界和验证方式。
 
-本文保留 REQ-006 的原始设计说明；REQ-007 在此基础上增加 SAH BVH。当前实现包含四种可选路径：
+本文保留 REQ-006 的原始设计说明；REQ-007 增加 SAH BVH，REQ-008 增加并行 HLBVH。当前实现包含五种可选路径：
 
 | 模式 | 规范名称 | 作用 |
 | --- | --- | --- |
@@ -10,8 +10,41 @@
 | 包围体层次 | `bvh` | 使用 BVH 逐层裁剪不可能命中的三角形 |
 | 八叉树 | `octree` | 使用空间八分递归裁剪求交范围 |
 | 表面积启发式 BVH | `sah` | 使用 12 桶 SAH 选择 BVH 分裂位置 |
+| 分层线性 BVH | `hlbvh` | 并行 Morton 编码及 LBVH 子树，上层用 SAH 合并 |
 
 默认模式仍然是 `brute_force`，因此不传 `acceleration` 选项的旧调用保持原有行为。
+
+### REQ-008：HLBVH 接入说明
+
+`HlbvhAccel` 与 `BvhAccel`、`SahBvhAccel` 一样继承 `AccelInterface` 并持有 `BvhTree`。
+`AccelerationType::Hlbvh` 追加为值 4；参数 `hlbvh` 大小写不敏感，编辑器显示 HLBVH。
+同步/异步请求、Full/Tile/Pixel 模式和 timing log 沿用既有数据流。
+
+实现参考本地 `D:/OtherEngines/pbrt-v4/src/pbrt/cpu/aggregates.cpp` 的 `buildHLBVH`、
+`emitLBVH`、`buildUpperSAH`，以及 `util/math.h` 的 Morton 位交错算法。
+使用项目自有节点索引和遍历，不引入 pbrt 类型、分配器或线性遍历布局。
+
+1. world-space 三角形 AABB 中心在质心包围盒内归一化，每轴量化为 10 位；零跨度轴为 0，最大边界为 1023。
+2. 编码按每批最多 1024 个图元并行计算，随后串行执行五轮稳定的六位基数排序。编码碰撞保持原始图元顺序。
+3. 高 12 位相同的图元形成一个 treelet；不同 treelet 并行构建，从 bit 17 向低位二分。图元数小于 4 或位耗尽时停止；碰撞叶可超过常规阈值。
+4. 所有 helper join 后按 Morton 前缀顺序合并局部节点并重映射索引。叶节点仍引用原始 `triangleIndex`。
+5. treelet 根按最大包围盒中心跨度轴执行 12 桶 SAH；权重是 treelet 数，遍历代价为 0.125。质心重合、零面积或无有效分区时使用确定性中位数回退。
+
+线程数沿用本机逻辑线程数减一，至少为 1，调用线程计入总数。任务独占预分配的 Morton 区间或局部节点 vector；
+worker 不访问 Godot Object，不调用日志，不并发扩容共享 vector。线程创建失败由已创建 helper 与调用线程完成剩余任务。
+构建不在中间取消，因此不会发布部分树；异步任务仍使用既有渲染取消与主线程收尾协议。
+同一实例的 build 与求交不能同时进行，build 返回后允许多个线程只读求交。
+
+HLBVH 根可能位于节点数组末尾，因此共享核心显式保存根索引；诊断用的左子树图元数量通过子树求和得到，
+不再依赖图元区间连续。求交继续复用原有三角形算法和同距选择规则（相同 t 时选较大原始索引）。
+包围盒 slab 区间增加保守浮点误差余量，防止三角形 t 的舍入误差误裁同距节点；最终三角形命中仍严格服从原始 t_max。
+
+构建和分配仅发生在 build 阶段，求交热路径不新增堆分配。本实现不承诺所有场景下都比 SAH 或中位数 BVH 更快；
+构建速度、内存与遍历质量取决于场景分布，未新增动态 refit、跨请求缓存或 GPU 功能。
+
+原生测试可用 `GODOT_CPP_GENERATED_INCLUDE_DIR` 指向已生成的隔离绑定头文件，默认仍为仓库的 `godot-cpp/gen/include`。
+测试包含 Morton 边界/碰撞、treelet/上层 SAH、退化与 rebuild、固定种子射线等价性、拓扑确定性、线程启动失败和并发求交。
+完整验证命令与实际结果见 REQ-008 需求记录。
 
 ## 1. 设计目标与非目标
 
@@ -78,7 +111,7 @@ Hit 或布尔命中结果
 | --- | --- | --- |
 | 接口层 | `src/accel/accel_interface.h` | 定义 `build`、`intersect`、`intersect_p` 语义 |
 | 公共几何层 | `src/accel/aabb.*`、`src/accel/triangle_intersection.*` | AABB、slab 求交、Moller-Trumbore 求交和 Hit 填充 |
-| 结构实现层 | `brute_force_accel.*`、`bvh_accel.*`、`sah_bvh_accel.*`、`octree_accel.*` | 四种场景求交实现 |
+| 结构实现层 | `brute_force_accel.*`、`bvh_accel.*`、`sah_bvh_accel.*`、`hlbvh_accel.*`、`octree_accel.*` | 五种场景求交实现 |
 | 选择和管线层 | `acceleration_structure.*`、`raytrace_exporter.cpp` | 解析选项、创建结构、接入同步/异步渲染 |
 
 ## 3. 核心接口与所有权
@@ -328,12 +361,13 @@ Sah        -> SahBvhAccel
 | `octree` | Octree |
 | `oct` | Octree，兼容别名 |
 | `sah` | SAH BVH |
+| `hlbvh` | 并行 HLBVH |
 
 解析会忽略大小写。未知值（例如 `grid`）直接返回错误，不启动渲染。结果字典和 timing log 使用规范名称，不回显别名。
 
 ### 9.3 编辑器插件
 
-编辑器插件在 3D 工具栏中提供 Brute Force、BVH、Octree、SAH BVH 下拉框。任务运行期间控件锁定，避免用户在已有请求快照后改变 UI 选择造成状态误解。
+编辑器插件在 3D 工具栏中提供 Brute Force、BVH、Octree、SAH BVH、HLBVH 下拉框。任务运行期间控件锁定，避免用户在已有请求快照后改变 UI 选择造成状态误解。
 
 ## 10. 同步和异步渲染生命周期
 
@@ -541,7 +575,8 @@ src/accel/octree_accel.cpp
 ## 17. 相关文档和记录
 
 - [REQ-006 完成记录](completed_requirements.md#req-006--可选-bvh、octree-与暴力场景求交)
-- [REQ-007 开发记录](requirements.md#req-007--新增独立-sah-bvh-加速类型)
+- [REQ-007 完成记录](completed_requirements.md#req-007--新增独立-sah-bvh-加速类型)
+- [REQ-008 HLBVH 验证与工具链](req008_hlbvh_validation.md)
 - [REQ-002 多线程光线追踪](completed_requirements.md#req-002--使用本机逻辑线程数减一并行计算光线追踪)
 - [REQ-005 异步导出线程边界](req005_threading_and_async_export.md)
 - [项目加速结构源码](../src/accel/)
